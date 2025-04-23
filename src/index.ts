@@ -1,11 +1,11 @@
-import { Context, Schema, h, Random } from 'koishi'
-import { on } from 'node:events';
-import fs from "node:fs";
-import path from "node:path";
-import { arrayBuffer } from 'node:stream/consumers';
-import { scheduler } from 'node:timers/promises';
+import { Context, Schema, h } from 'koishi'
+import {} from "koishi-plugin-puppeteer";
 
 export const name = 'anime-ccb'
+
+export const inject = {
+  required: ["puppeteer"],
+};
 
 export const usage = `
 <h1>二刺螈猜猜呗</h1>
@@ -19,7 +19,7 @@ export const Config: Schema<Config> = Schema.intersect([
   Schema.object({
     start_command: Schema.string().default("ccb").description("**游戏开始**的指令名称"),
     include_game: Schema.boolean().default(false).description("是否包含游戏作品   **仅自建题库生效**"),
-    times: Schema.number().default(10).min(5).max(100).description("每局猜测次数"),
+    s_limit:Schema.number().default(10).description("关键词搜索的角色显示数量"),
     reminder: Schema.boolean().default(true).description("是否启用提示"),
   }).description('基础设置'),
   Schema.object({
@@ -61,6 +61,16 @@ export const Config: Schema<Config> = Schema.intersect([
 interface Gaming {
   [channelId: string]: boolean
 }
+interface Feedback {
+  gender: { guess: any; feedback: string };
+  popularity: { guess: number; feedback: string };
+  rating: { guess: number; feedback: string };
+  shared_appearances: { first: string; count: number };
+  appearancesCount: { guess: number; feedback: string };
+  metaTags: { guess: string[]; shared: string[] };
+  latestAppearance: { guess: number | string; feedback: string };
+  earliestAppearance: { guess: number | string; feedback: string };
+}
 
 // api授权
 const accessToken = 'EP9NgEwLt2GgJWJSbFCDpqRNGCU0uVGCziFeEUMV';
@@ -77,33 +87,116 @@ export function apply(ctx: Context, config) {
   ctx.command(config.start_command)
     .action(async ({session}) => {
 
-      // 检测状态
+      // 初始化并检测游戏状态
       if (games[session.channelId]) {
         return "当前已有正在进行的游戏"
       }
-      games[session.channelId] = true
+      games[session.channelId] = true;
+      const sentMetaTags = new Set<any>(); // 定义一个存储已发送元标签的集合
       
+      
+      // 答题进程
+      try {
+        await session.send("加载中~");
+        // 获取随机角色作为正确答案
+        const characterAnswer = await getRandomCharacter(ctx, config);
+        // const { id, nameCn, gender, image, summary, popularity } = characterAnswer.characterDetails;
+        // const { appearances: validAppearances, latestAppearance, earliestAppearance, highestRating, metaTags } = characterAnswer.appearances;
+        const answerDetails = characterAnswer.characterDetails; // 角色细节
+        const answerAppearances = characterAnswer.appearances; // 角色出场信息
+        const answerData = {
+          ...answerAppearances,
+          ...answerDetails
+        }
+        console.log("生成角色答案：", answerData);
+        await session.send("加载成功，猜猜呗游戏开始~");
+
+        // 搜索功能
+        ctx.command('搜索 [...arg]')
+        .action(async({session}, ...arg) => {
+          let kw = '';
+          kw += (arg === undefined) ? '' :arg.join('');
+          if (kw == ''){
+            await session.send("您输入的关键词为空");
+          }else{
+            const s_response = await searchCharacters(ctx, config, kw);
+            if (s_response.data.length === 0){
+              await session.send("未找到相关角色");
+              return;
+            }else{
+              const message = s_response.data.map(character => `
+                ID: ${character.id}
+                名称: ${character.name}
+              `.trim()).join('\n\n');
+              await session.send(message);
+            }
+          }
+        });
+        
 
 
-      const randomCharacter = await getRandomCharacter(ctx, config);
-      const { nameCn, gender, image, summary, popularity } = randomCharacter.characterDetails;
-      const { appearances: validAppearances, latestAppearance, earliestAppearance, highestRating, metaTags } = randomCharacter.appearances;
-      const imageBuffer = Buffer.from(image);// 将 ArrayBuffer 转换为 Buffer
-      // 格式化输出信息
-      const message = h('div', [
-        h('img', { src: `data:image/jpeg;base64,${imageBuffer.toString('base64')}` }),
-        h('p', `角色名称: ${nameCn || '未知'}`),
-        h('p', `性别: ${gender}`),
-        h('p', `简介: ${summary || '无简介'}`),
-        h('p', `人气: ${popularity}`),
-        h('p', `角色出场作品: ${validAppearances}`),
-        h('p', `角色最晚出场年份: ${latestAppearance}`),
-        h('p', `角色最早出场年份: ${earliestAppearance}`),
-        h('p', `角色最高评分: ${highestRating}`),
-        h('p', `元标签: ${metaTags}`),
-      ]);
-      await session.send(message);
+        const dispose = ctx.channel(session.channelId).middleware(async (session, next) => { // 使用中间键
+          // 提示功能
+          if (session.content === "提示" && config.reminder === true){
+            const filteredMetaTags = answerAppearances.metaTags.filter(tag => tag !== config.atype && tag !== config.form); // 过滤掉用户自选类型
+            const availableMetaTags = filteredMetaTags.filter(tag => !sentMetaTags.has(tag));// 过滤掉已发送的元标签
+            if (availableMetaTags && availableMetaTags.length > 0) {
+              const randomMetaTag = availableMetaTags[Math.floor(Math.random() * availableMetaTags.length)];
+              await session.send(`提示：角色的一个元标签是 ${randomMetaTag}`);  
+              sentMetaTags.add(randomMetaTag);// 将已发送的元标签添加到集合中
+            }else{
+              await session.send("所有元标签已发送完毕！");
+            }
+          };
 
+          console.log("用户发送:", session.content);
+          console.log("答案:", answerData.nameCn +''+ answerData.id);
+          
+          // 判断答案
+          if (session.content === answerData.id){
+            dispose();
+            games[session.channelId] = false;
+            await session.send("猜对了");
+          }else if(session.content !== null && !isNaN(Number(session.content))){
+            const user_ans = session.content;
+            // 获取用户回答角色
+            const ua_Details = await getCharacterDetails(user_ans,ctx);
+            const ua_Appearances = await getCharacterApperance(user_ans,ctx,config);
+            console.log("用户回答细节：", ua_Details.nameCn + ua_Appearances.metaTags);
+            const ua_Data = {
+              ...ua_Appearances,
+              ...ua_Details
+            }
+            const result = await generateFeedback(ua_Data, answerData);
+            console.log("结果：", result);
+            const imageBuffer = await generateImg(ctx.puppeteer);
+            await session.send(h.image(imageBuffer,"image/jpeg"));
+          }
+            
+                         
+        });
+      } catch (error) {
+        console.log("游戏进程错误：", error);
+      }
+      
+      // const randomCharacter = await getRandomCharacter(ctx, config);
+      // const { nameCn, gender, image, summary, popularity } = randomCharacter.characterDetails;
+      // const { appearances: validAppearances, latestAppearance, earliestAppearance, highestRating, metaTags } = randomCharacter.appearances;
+      // const imageBuffer = Buffer.from(image);// 将 ArrayBuffer 转换为 Buffer
+      // // 格式化输出信息
+      // const message = h('div', [
+      //   h('img', { src: `data:image/jpeg;base64,${imageBuffer.toString('base64')}` }),
+      //   h('p', `角色名称: ${nameCn || '未知'}`),
+      //   h('p', `性别: ${gender}`),
+      //   h('p', `简介: ${summary || '无简介'}`),
+      //   h('p', `人气: ${popularity}`),
+      //   h('p', `角色出场作品: ${validAppearances}`),
+      //   h('p', `角色最晚出场年份: ${latestAppearance}`),
+      //   h('p', `角色最早出场年份: ${earliestAppearance}`),
+      //   h('p', `角色最高评分: ${highestRating}`),
+      //   h('p', `元标签: ${metaTags}`),
+      // ]);
+      // await session.send(message);
 
     });
 }
@@ -153,7 +246,22 @@ async function getSubjectDetails(subjectId: number, ctx: Context){// 获取作�
   }
 }
 
-async function getCharacterApperance(characterId: number,ctx: Context, config) {// 获取角色出场信息
+async function searchCharacters(ctx:Context,config, s_word: string) {// 关键词搜索角色
+  try {
+    const response = await ctx.http.post(
+      `https://api.bgm.tv/v0/search/characters?limit=${config.s_limit}`,
+      {
+        keyword: s_word
+      }
+    );
+    console.log("用户搜索角色！");
+    return response;
+  }catch (error){
+    console.log("搜索角色错误：", error);
+  }
+}
+
+async function getCharacterApperance(characterId: string,ctx: Context, config) {// 获取角色出场信息
   try{
     // 请求角色的出场作品和配音演员信息
     const [subjectsResponse, personsResponse] = await Promise.all([
@@ -246,11 +354,11 @@ async function getCharacterApperance(characterId: number,ctx: Context, config) {
       .sort((a, b) => b.rating_count - a.rating_count)// 根据评分人数降序排列
       .map(appearance => appearance.name);// map方法遍历提取每个作品名称
     // 特殊角色处理
-    if (characterId === 56822 || characterId === 56823 || characterId === 17529 || characterId === 10956) {
-      personsResponse.data = [];
-      allMetaTags.add('展开');
-    } // 
-    else if (personsResponse.data && personsResponse.data.length) {
+    // if (characterId === 56822 || characterId === 56823 || characterId === 17529 || characterId === 10956) {
+    //   personsResponse.data = [];
+    //   allMetaTags.add('展开');
+    // } // 
+    if (personsResponse.data && personsResponse.data.length) {
       const animeVAs = personsResponse.data.filter(person => person.subject_type === 2 || person.subject_type === 4);
       if (animeVAs.length > 0) {
         animeVAs.forEach(person => {
@@ -274,7 +382,7 @@ async function getCharacterApperance(characterId: number,ctx: Context, config) {
   
 }
 
-async function getCharacterDetails(characterId:number, ctx:Context) {// 获取角色详细信息
+async function getCharacterDetails(characterId:string, ctx:Context) {// 获取角色详细信息
   try{
     // 请求api
     const url = `https://api.bgm.tv/v0/characters/${characterId}`;
@@ -300,7 +408,8 @@ async function getCharacterDetails(characterId:number, ctx:Context) {// 获取�
       gender,
       image: imageArrayBuffer,
       summary: response.summary,
-      popularity: response.stat.collects
+      popularity: response.stat.collects,
+      id: characterId
     };
   }catch (error){
     console.log("获取角色信息错误：",error);
@@ -399,6 +508,7 @@ async function getRandomCharacter(ctx:Context, config) {// 根据用户设置随
       subject = indexResponse;
     }else{
     // 设置范围模式
+      const mtag_filter = Array.isArray(config.atype) ? config.qtype : [config.atype];// 获取类型标签
       randomOffset = Math.floor(Math.random() * config.rank);// 生成随机偏移量
       const endDate = new Date(`${config.end_year + 1}-01-01`);
       const today = new Date();
@@ -410,7 +520,7 @@ async function getRandomCharacter(ctx:Context, config) {// 根据用户设置随
           "type": [2],
           "air_date": [`>=${config.start_year}-01-01`,
           `<${minDate}`],
-          "meta_tags": config.qtype.filter(tag => tag !== "")
+          "meta_tags": mtag_filter.filter(tag => tag !== "")// 根据过滤条件获取
         }
       });
       if (!response) {
@@ -448,3 +558,151 @@ async function getRandomCharacter(ctx:Context, config) {// 根据用户设置随
     console.log("获取随机角色错误：", error);
   }
 }
+
+async function generateFeedback(guess, answerCharacter) {// 根据用户答案和正确答案计算反馈
+  try {
+    const result: Feedback = {
+      gender: { guess: guess.gender, feedback: '' },
+      popularity: { guess: guess.popularity, feedback: '' },
+      rating: { guess: guess.highestRating, feedback: '' },
+      shared_appearances: { first: '', count: 0 },
+      appearancesCount: { guess: guess.appearances.length, feedback: '' },
+      metaTags: { guess: guess.metaTags, shared: [] },
+      latestAppearance: { guess: guess.latestAppearance === -1 ? '?' : guess.latestAppearance, feedback: '' },
+      earliestAppearance: { guess: guess.earliestAppearance === -1 ? '?' : guess.earliestAppearance, feedback: '' }
+    };
+    
+    // 性别比较
+    result.gender = {
+      guess: guess.gender,
+      feedback: guess.gender === answerCharacter.gender ? 'yes' : 'no'
+    };
+    // 计算人气差距
+    const popularityDiff = guess.popularity - answerCharacter.popularity;
+    const fivePercent = answerCharacter.popularity * 0.05;
+    const twentyPercent = answerCharacter.popularity * 0.2;
+    let popularityFeedback;
+    if (Math.abs(popularityDiff) <= fivePercent) {
+      popularityFeedback = '=';
+    } else if (popularityDiff > 0) {
+      popularityFeedback = popularityDiff <= twentyPercent ? '+' : '++';
+    } else {
+      popularityFeedback = popularityDiff >= -twentyPercent ? '-' : '--';
+    }
+    result.popularity = {
+      guess: guess.popularity,
+      feedback: popularityFeedback
+    };
+    // 评分差距
+    const ratingDiff = guess.highestRating - answerCharacter.highestRating;
+    let ratingFeedback;
+    if (guess.highestRating === -1 || answerCharacter.highestRating === -1) {
+      ratingFeedback = '?';
+    } else if (Math.abs(ratingDiff) <= 0.2) {
+      ratingFeedback = '=';
+    } else if (ratingDiff > 0) {
+      ratingFeedback = ratingDiff <= 0.5 ? '+' : '++';
+    } else {
+      ratingFeedback = ratingDiff >= -0.5 ? '-' : '--';
+    }
+    result.rating = {
+      guess: guess.highestRating,
+      feedback: ratingFeedback
+    };
+    // 出场作品差距
+    const sharedAppearances = guess.appearances.filter(appearance => answerCharacter.appearances.includes(appearance));
+    result.shared_appearances = {
+      first: sharedAppearances[0] || '',
+      count: sharedAppearances.length
+    };
+    // 出场作品数量差距
+    const appearanceDiff = guess.appearances.length - answerCharacter.appearances.length;
+    let appearancesFeedback;
+    if (appearanceDiff === 0) {
+      appearancesFeedback = '=';
+    } else if (appearanceDiff > 0) {
+      appearancesFeedback = appearanceDiff <= 2 ? '+' : '++';
+    } else {
+      appearancesFeedback = appearanceDiff >= -2 ? '-' : '--';
+    }
+    result.appearancesCount = {
+      guess: guess.appearances.length,
+      feedback: appearancesFeedback
+    };
+    // 元标签差距
+    const answerMetaTagsSet = new Set(answerCharacter.metaTags);
+    const sharedMetaTags = guess.metaTags.filter(tag => answerMetaTagsSet.has(tag));
+    result.metaTags = {
+      guess: guess.metaTags,
+      shared: sharedMetaTags
+    };
+    // 最新出场差距
+    if (guess.latestAppearance === -1 || answerCharacter.latestAppearance === -1) {
+      result.latestAppearance = {
+        guess: guess.latestAppearance === -1 ? '?' : guess.latestAppearance,
+        feedback: guess.latestAppearance === -1 && answerCharacter.latestAppearance === -1 ? '=' : '?'
+      };
+    } else {
+      const yearDiff = guess.latestAppearance - answerCharacter.latestAppearance;
+      let yearFeedback;
+      if (yearDiff === 0) {
+        yearFeedback = '=';
+      } else if (yearDiff > 0) {
+        yearFeedback = yearDiff <= 2 ? '+' : '++';
+      } else {
+        yearFeedback = yearDiff >= -2 ? '-' : '--';
+      }
+      result.latestAppearance = {
+        guess: guess.latestAppearance,
+        feedback: yearFeedback
+      };
+    }
+    // 最早出场差距
+    if (guess.earliestAppearance === -1 || answerCharacter.earliestAppearance === -1) {
+      result.earliestAppearance = {
+        guess: guess.earliestAppearance === -1 ? '?' : guess.earliestAppearance,
+        feedback: guess.earliestAppearance === -1 && answerCharacter.earliestAppearance === -1 ? '=' : '?'
+      };
+    } else {
+      const yearDiff = guess.earliestAppearance - answerCharacter.earliestAppearance;
+      let yearFeedback;
+      if (yearDiff === 0) {
+        yearFeedback = '=';
+      } else if (yearDiff > 0) {
+        yearFeedback = yearDiff <= 2 ? '+' : '++';
+      } else {
+        yearFeedback = yearDiff >= -2 ? '-' : '--';
+      }
+      result.earliestAppearance = {
+        guess: guess.earliestAppearance,
+        feedback: yearFeedback
+      };
+    }
+    return result;
+  } catch (error) {
+    console.log("获取结果反馈错误：", error);
+  }
+}
+
+async function generateImg(pptr) {// 渲染图片
+  try {
+    const page = await pptr.browser.newPage();
+    // const textcolor = `rgb(255,255,255)`;
+    // const backgroundcolor = `rgb(0,0,0)`;
+    await page.setContent(testHTML);
+    const screenshot = await page.screenshot({encoding:'binary'});
+    await page.close();
+    return screenshot;
+  } catch (error) {
+    console.log("渲染图片出错：", error);
+  }
+}
+
+const testHTML = `
+<html style={"color: purple;"}>
+  <h1>This is a header</h1>
+  <p>Hello Puppeteer!</p>
+</html>
+`;
+
+
