@@ -61,16 +61,31 @@ export const Config: Schema<Config> = Schema.intersect([
 interface Gaming {
   [channelId: string]: boolean
 }
+// 比对反馈数据接口
 interface Feedback {
   gender: { guess: any; feedback: string };
-  popularity: { guess: number; feedback: string };
-  rating: { guess: number; feedback: string };
-  shared_appearances: { first: string; count: number };
-  appearancesCount: { guess: number; feedback: string };
+  popularity: { guess: any; feedback: string };
+  rating: { guess: any; feedback: string };
+  shared_appearances: { first: string[]; count: number };
+  appearancesCount: { guess: any; feedback: string };
   metaTags: { guess: string[]; shared: string[] };
   latestAppearance: { guess: number | string; feedback: string };
   earliestAppearance: { guess: number | string; feedback: string };
 }
+// 用户回答角色数据接口
+interface Character {
+  imgurl: string;
+  name: string;
+  gender: string;
+  popularity: string;
+  workscount: string;
+  highestRating: string;
+  earliestAppearance: number | string;
+  latestAppearance: number | string;
+  tags: string[];
+  shared_appearances: string[]
+}
+
 
 // api授权
 const accessToken = 'EP9NgEwLt2GgJWJSbFCDpqRNGCU0uVGCziFeEUMV';
@@ -93,6 +108,10 @@ export function apply(ctx: Context, config) {
       }
       games[session.channelId] = true;
       const sentMetaTags = new Set<any>(); // 定义一个存储已发送元标签的集合
+      const characters:Character[]=[];
+
+      // const imageBuffer = await generateImg(ctx.puppeteer);
+      // session.send(h.image(imageBuffer,"image/jpeg"));
       
       
       // 答题进程
@@ -151,9 +170,10 @@ export function apply(ctx: Context, config) {
 
           console.log("用户发送:", session.content);
           console.log("答案:", answerData.nameCn +''+ answerData.id);
+
           
           // 判断答案
-          if (session.content === answerData.id){
+          if (session.content === `${answerData.id}` || session.content === `${answerData.nameCn}`){
             dispose();
             games[session.channelId] = false;
             await session.send("猜对了");
@@ -168,8 +188,33 @@ export function apply(ctx: Context, config) {
               ...ua_Details
             }
             const result = await generateFeedback(ua_Data, answerData);
-            console.log("结果：", result);
-            const imageBuffer = await generateImg(ctx.puppeteer);
+            // console.log("结果：", result);
+
+            
+            const an_character:Character = {
+              imgurl: ua_Data.imageUrl,
+              name: ua_Data.nameCn,
+              gender: result.gender.guess,
+              popularity: result.popularity.guess,
+              workscount: result.appearancesCount.guess,
+              highestRating: result.rating.guess,
+              earliestAppearance: result.earliestAppearance.guess,
+              latestAppearance: result.earliestAppearance.guess,
+              tags: result.metaTags.shared,
+              shared_appearances: result.shared_appearances.first
+            }
+            // 根据 feedback 调整
+            an_character.gender += result.gender.feedback === 'yes' ? ' √' : result.gender.feedback === 'no' ? ' ×' : '';
+            an_character.popularity += result.popularity.feedback === '+' ? '↑' : result.popularity.feedback === '++' ? ' ↑↑' : result.popularity.feedback === '-' ? ' ↓' : result.popularity.feedback === '--' ? ' ↓↓' : '';
+            an_character.workscount += result.appearancesCount.feedback === '+' ? '↑' : result.appearancesCount.feedback === '++' ? ' ↑↑' : result.appearancesCount.feedback === '-' ? ' ↓' : result.appearancesCount.feedback === '--' ? ' ↓↓' : '';
+            an_character.highestRating += result.rating.feedback === '+' ? '↑' : result.rating.feedback === '++' ? ' ↑↑' : result.rating.feedback === '-' ? ' ↓' : result.rating.feedback === '--' ? ' ↓↓' : '';
+            an_character.earliestAppearance += result.earliestAppearance.feedback === '+' ? '↑' : result.earliestAppearance.feedback === '++' ? ' ↑↑' : result.earliestAppearance.feedback === '-' ? ' ↓' : result.earliestAppearance.feedback === '--' ? ' ↓↓' : '';
+            an_character.latestAppearance += result.latestAppearance.feedback === '+' ? '↑' : result.latestAppearance.feedback === '++' ? ' ↑↑' : result.latestAppearance.feedback === '-' ? ' ↓' : result.latestAppearance.feedback === '--' ? ' ↓↓' : '';
+            
+            characters.push(an_character);
+            // console.log('表格结果：', characters);
+
+            const imageBuffer = await generateImg(ctx.puppeteer, characters);
             await session.send(h.image(imageBuffer,"image/jpeg"));
           }
             
@@ -400,13 +445,14 @@ async function getCharacterDetails(characterId:string, ctx:Context) {// 获取�
     // 获取图片
     let imageArrayBuffer: ArrayBuffer;
     let imageUrl:string;
-    imageUrl = response.images.medium;
+    imageUrl = response.images.grid;
     imageArrayBuffer = await ctx.http.get(imageUrl, {responseType:"arraybuffer"});
     // 返回数据
     return {
       nameCn: nameCn,
       gender,
       image: imageArrayBuffer,
+      imageUrl,
       summary: response.summary,
       popularity: response.stat.collects,
       id: characterId
@@ -465,7 +511,6 @@ async function searchSubjects(keyword, ctx:Context) {// 根据关键词搜索作
     const response = await ctx.http.post(`https://api.bgm.tv/v0/search/subjects`, {
       keyword: keyword.trim(),
       filter: {
-        // type: [2]  // 单动画
         type: [2, 4]  // 动画与游戏
       }
     });
@@ -565,7 +610,7 @@ async function generateFeedback(guess, answerCharacter) {// 根据用户答案�
       gender: { guess: guess.gender, feedback: '' },
       popularity: { guess: guess.popularity, feedback: '' },
       rating: { guess: guess.highestRating, feedback: '' },
-      shared_appearances: { first: '', count: 0 },
+      shared_appearances: { first: [], count: 0 },
       appearancesCount: { guess: guess.appearances.length, feedback: '' },
       metaTags: { guess: guess.metaTags, shared: [] },
       latestAppearance: { guess: guess.latestAppearance === -1 ? '?' : guess.latestAppearance, feedback: '' },
@@ -684,11 +729,77 @@ async function generateFeedback(guess, answerCharacter) {// 根据用户答案�
   }
 }
 
-async function generateImg(pptr) {// 渲染图片
+
+
+async function generateImg(pptr, input_character) {// 渲染图片
   try {
     const page = await pptr.browser.newPage();
-    // const textcolor = `rgb(255,255,255)`;
-    // const backgroundcolor = `rgb(0,0,0)`;
+    const characters = input_character;
+
+    const testHTML = `
+    <head>
+    <title>charactertable</title>
+      <style>
+        html {
+          width: auto;
+          height: auto;
+        }
+        body {
+          font-family: Arial, sans-serif;
+          background-color: #f0f8ff;
+          margin: 0;
+          padding: 20px;
+        }
+        table {
+          width: 100%;
+          margin: 20px 0;
+          table-layout: auto;
+          background-color: #FBFBFB; 
+          border-collapse: separate;	/* 让border-radius有效 */
+          border-spacing: 0; 
+          border-radius: 10px;
+          overflow: hidden;
+          text-align: center;
+        }
+        
+        table thead tr, table tbody tr {
+          height: auto;
+          line-height: auto;
+        }
+        table tr {
+          background: #ffffff;
+          color: rgb(0, 0, 0);
+          font-weight: bold;
+        }
+        table th {
+          background: #869db1;
+          color: rgb(0, 0, 0);
+          font-weight: bold;
+        }          
+        table tbody tr td { /*分隔框*/
+          border-left: 1px solid #000000;
+          border-bottom: 1px solid #000000;
+        }
+        table tbody tr td:first-child {
+          border-left: none; 
+        }
+        table tbody tr:last-child td {
+          border-bottom: none; 
+        }
+      </style>
+    </head>
+    <table style>
+      <thead>
+        <tr>
+          <th>名字</th><th>性别</th><th>人气值</th><th>作品数<br>最高分</th><th>最早登场<br>最晚登场</th><th>标签</th><th>共同出演</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${characters.map(character => generateTableRow(character)).join('')}
+      </tbody>
+    </table>
+    `;
+
     await page.setContent(testHTML);
     const screenshot = await page.screenshot({encoding:'binary'});
     await page.close();
@@ -698,11 +809,22 @@ async function generateImg(pptr) {// 渲染图片
   }
 }
 
-const testHTML = `
-<html style={"color: purple;"}>
-  <h1>This is a header</h1>
-  <p>Hello Puppeteer!</p>
-</html>
-`;
+function generateTableRow(character: Character): string {//生成表格行
+  return `
+    <tr>
+      <td><img src="${character.imgurl}" width="20px" height="20px">${character.name}</td>
+      <td>${character.gender}</td>
+      <td>${character.popularity}<br>${character.workscount}</td>
+      <td>${character.highestRating}</td>
+      <td>${character.earliestAppearance}<br>${character.latestAppearance}</td>
+      <td style="max-width: 70px;">${character.tags.join(', ')}</td> 
+      <td>${character.shared_appearances}</td>
+    </tr>
+  `;
+}
+
+
+
+
 
 
