@@ -58,6 +58,7 @@ export const Config: Schema<Config> = Schema.intersect([
     ]),
 ]);
 
+// 游戏进程检测
 interface Gaming {
   [channelId: string]: boolean
 }
@@ -83,9 +84,15 @@ interface Character {
   earliestAppearance: number | string;
   latestAppearance: number | string;
   tags: string[];
-  shared_appearances: string[]
+  shared_appearances: string[];
 }
-
+// 用户搜索返回数据
+interface sCharacter {
+  imgurl: string;
+  name: string;
+  jname: string;
+  id: string;
+}
 
 // api授权
 const accessToken = 'EP9NgEwLt2GgJWJSbFCDpqRNGCU0uVGCziFeEUMV';
@@ -98,43 +105,37 @@ const accessToken = 'EP9NgEwLt2GgJWJSbFCDpqRNGCU0uVGCziFeEUMV';
 
 // 基本逻辑
 export function apply(ctx: Context, config) {
-  let games: Gaming = {}
+  let games: Gaming = {};
+
   ctx.command(config.start_command)
     .action(async ({session}) => {
 
-      // 初始化并检测游戏状态
+      // 初始化
       if (games[session.channelId]) {
         return "当前已有正在进行的游戏"
       }
       games[session.channelId] = true;
-      const sentMetaTags = new Set<any>(); // 定义一个存储已发送元标签的集合
-      const characters:Character[]=[];
+      const sentMetaTags = new Set<any>(); // 存储已发送元标签的集合
+      const characters:Character[]=[]; // 存储用户回答的角色
+      const userAnsHistory: string[] = [];// 存储用户回答历史
 
-      // const imageBuffer = await generateImg(ctx.puppeteer);
-      // session.send(h.image(imageBuffer,"image/jpeg"));
-      
-      
       // 答题进程
       try {
         await session.send("加载中~");
         // 获取随机角色作为正确答案
         const characterAnswer = await getRandomCharacter(ctx, config);
-        // const { id, nameCn, gender, image, summary, popularity } = characterAnswer.characterDetails;
-        // const { appearances: validAppearances, latestAppearance, earliestAppearance, highestRating, metaTags } = characterAnswer.appearances;
         const answerDetails = characterAnswer.characterDetails; // 角色细节
         const answerAppearances = characterAnswer.appearances; // 角色出场信息
         const answerData = {
           ...answerAppearances,
           ...answerDetails
         }
-        console.log("生成角色答案：", answerData);
-        await session.send("加载成功，猜猜呗游戏开始~");
+        await session.send("加载成功!猜猜呗游戏开始~\n输入[搜索 关键词]可根据关键词检索角色id");
 
-        // 搜索功能
+        // 角色检索功能
         ctx.command('搜索 [...arg]')
         .action(async({session}, ...arg) => {
-          let kw = '';
-          kw += (arg === undefined) ? '' :arg.join('');
+          const kw = arg.join(' ').trim();
           if (kw == ''){
             await session.send("您输入的关键词为空");
           }else{
@@ -142,20 +143,28 @@ export function apply(ctx: Context, config) {
             if (s_response.data.length === 0){
               await session.send("未找到相关角色");
               return;
-            }else{
-              const message = s_response.data.map(character => `
-                ID: ${character.id}
-                名称: ${character.name}
-              `.trim()).join('\n\n');
-              await session.send(message);
+            }else{// 发送检索结果
+              const result: sCharacter [] =[];
+              s_response.data.forEach(character => {
+                const s_character: sCharacter = {
+                  id: character.id.toString(),
+                  jname: character.name,
+                  imgurl: character.images?.grid || [],
+                  name: character.infobox?.find(item => item.key === '简体中文名')?.value || '无中文名'
+                };
+                result.push(s_character); 
+              });
+              const imageBuffer = await generateSearchImg(ctx.puppeteer, result);
+              await session.send(h.image(imageBuffer,"image/jpeg"));
             }
           }
         });
         
 
-
+        // 启动监听
         const dispose = ctx.channel(session.channelId).middleware(async (session, next) => { // 使用中间键
-          // 提示功能
+          
+          // 1、提示功能
           if (session.content === "提示" && config.reminder === true){
             const filteredMetaTags = answerAppearances.metaTags.filter(tag => tag !== config.atype && tag !== config.form); // 过滤掉用户自选类型
             const availableMetaTags = filteredMetaTags.filter(tag => !sentMetaTags.has(tag));// 过滤掉已发送的元标签
@@ -169,16 +178,39 @@ export function apply(ctx: Context, config) {
           };
 
           console.log("用户发送:", session.content);
-          console.log("答案:", answerData.nameCn +''+ answerData.id);
+          console.log("答案:", answerData);
 
-          
-          // 判断答案
+          // 2、判断答案
           if (session.content === `${answerData.id}` || session.content === `${answerData.nameCn}`){
             dispose();
             games[session.channelId] = false;
-            await session.send("猜对了");
+            const summary = answerData.summary;
+            let handled_sum = null;
+            if (summary.length > 200) {// 处理简介
+              handled_sum = summary.substring(0, 200) + '...';
+            }else{
+              handled_sum = summary;
+            }
+            const answer = {// 处理卡片渲染需要的数据
+              bigImgurl: answerData.BimageUrl,
+              name: answerData.nameCn,
+              imgurl: answerData.imageUrl,
+              id: answerData.id,
+              summary: handled_sum,
+              popularity: answerData.popularity,
+              work: answerData.appearances[0]
+            };
+            // 发送答案正确卡片
+            const imageBuffer = await generateResultImg(ctx.puppeteer, answer);
+            await session.send(h.image(imageBuffer,"image/jpeg"));
           }else if(session.content !== null && !isNaN(Number(session.content))){
             const user_ans = session.content;
+            if (userAnsHistory.includes(user_ans)) {// 检查用户输入的角色是否已经存在表格中
+              await session.send("此角色已在表格中~");
+              return;
+            } else {
+              userAnsHistory.push(user_ans);
+            }
             // 获取用户回答角色
             const ua_Details = await getCharacterDetails(user_ans,ctx);
             const ua_Appearances = await getCharacterApperance(user_ans,ctx,config);
@@ -188,10 +220,7 @@ export function apply(ctx: Context, config) {
               ...ua_Details
             }
             const result = await generateFeedback(ua_Data, answerData);
-            // console.log("结果：", result);
-
-            
-            const an_character:Character = {
+            const an_character:Character = {// 处理卡片渲染需要的数据
               imgurl: ua_Data.imageUrl,
               name: ua_Data.nameCn,
               gender: result.gender.guess,
@@ -205,44 +234,19 @@ export function apply(ctx: Context, config) {
             }
             // 根据 feedback 调整
             an_character.gender += result.gender.feedback === 'yes' ? ' √' : result.gender.feedback === 'no' ? ' ×' : '';
-            an_character.popularity += result.popularity.feedback === '+' ? '↑' : result.popularity.feedback === '++' ? ' ↑↑' : result.popularity.feedback === '-' ? ' ↓' : result.popularity.feedback === '--' ? ' ↓↓' : '';
-            an_character.workscount += result.appearancesCount.feedback === '+' ? '↑' : result.appearancesCount.feedback === '++' ? ' ↑↑' : result.appearancesCount.feedback === '-' ? ' ↓' : result.appearancesCount.feedback === '--' ? ' ↓↓' : '';
-            an_character.highestRating += result.rating.feedback === '+' ? '↑' : result.rating.feedback === '++' ? ' ↑↑' : result.rating.feedback === '-' ? ' ↓' : result.rating.feedback === '--' ? ' ↓↓' : '';
-            an_character.earliestAppearance += result.earliestAppearance.feedback === '+' ? '↑' : result.earliestAppearance.feedback === '++' ? ' ↑↑' : result.earliestAppearance.feedback === '-' ? ' ↓' : result.earliestAppearance.feedback === '--' ? ' ↓↓' : '';
-            an_character.latestAppearance += result.latestAppearance.feedback === '+' ? '↑' : result.latestAppearance.feedback === '++' ? ' ↑↑' : result.latestAppearance.feedback === '-' ? ' ↓' : result.latestAppearance.feedback === '--' ? ' ↓↓' : '';
-            
+            an_character.popularity += result.popularity.feedback === '+' ? '↓' : result.popularity.feedback === '++' ? ' ↓↓' : result.popularity.feedback === '-' ? ' ↑' : result.popularity.feedback === '--' ? ' ↑↑' : '';
+            an_character.workscount += result.appearancesCount.feedback === '+' ? '↓' : result.appearancesCount.feedback === '++' ? ' ↓↓' : result.appearancesCount.feedback === '-' ? ' ↑' : result.appearancesCount.feedback === '--' ? ' ↑↑' : '';
+            an_character.highestRating += result.rating.feedback === '+' ? '↓' : result.rating.feedback === '++' ? ' ↓↓' : result.rating.feedback === '-' ? ' ↑' : result.rating.feedback === '--' ? ' ↑↑' : '';
+            an_character.earliestAppearance += result.earliestAppearance.feedback === '+' ? '↓' : result.earliestAppearance.feedback === '++' ? ' ↓↓' : result.earliestAppearance.feedback === '-' ? ' ↑' : result.earliestAppearance.feedback === '--' ? ' ↑↑' : '';
+            an_character.latestAppearance += result.latestAppearance.feedback === '+' ? '↓' : result.latestAppearance.feedback === '++' ? ' ↓↓' : result.latestAppearance.feedback === '-' ? ' ↑' : result.latestAppearance.feedback === '--' ? ' ↑↑' : '';            
             characters.push(an_character);
-            // console.log('表格结果：', characters);
-
             const imageBuffer = await generateImg(ctx.puppeteer, characters);
             await session.send(h.image(imageBuffer,"image/jpeg"));
-          }
-            
-                         
+          }                         
         });
       } catch (error) {
         console.log("游戏进程错误：", error);
       }
-      
-      // const randomCharacter = await getRandomCharacter(ctx, config);
-      // const { nameCn, gender, image, summary, popularity } = randomCharacter.characterDetails;
-      // const { appearances: validAppearances, latestAppearance, earliestAppearance, highestRating, metaTags } = randomCharacter.appearances;
-      // const imageBuffer = Buffer.from(image);// 将 ArrayBuffer 转换为 Buffer
-      // // 格式化输出信息
-      // const message = h('div', [
-      //   h('img', { src: `data:image/jpeg;base64,${imageBuffer.toString('base64')}` }),
-      //   h('p', `角色名称: ${nameCn || '未知'}`),
-      //   h('p', `性别: ${gender}`),
-      //   h('p', `简介: ${summary || '无简介'}`),
-      //   h('p', `人气: ${popularity}`),
-      //   h('p', `角色出场作品: ${validAppearances}`),
-      //   h('p', `角色最晚出场年份: ${latestAppearance}`),
-      //   h('p', `角色最早出场年份: ${earliestAppearance}`),
-      //   h('p', `角色最高评分: ${highestRating}`),
-      //   h('p', `元标签: ${metaTags}`),
-      // ]);
-      // await session.send(message);
-
     });
 }
 
@@ -422,9 +426,6 @@ async function getCharacterApperance(characterId: string,ctx: Context, config) {
   }catch (error){
     console.log("请求角色的出场作品和配音演员信息错误：",error)
   }
-  
-
-  
 }
 
 async function getCharacterDetails(characterId:string, ctx:Context) {// 获取角色详细信息
@@ -443,16 +444,16 @@ async function getCharacterDetails(characterId:string, ctx:Context) {// 获取�
       ? response.gender 
       : '?';
     // 获取图片
-    let imageArrayBuffer: ArrayBuffer;
-    let imageUrl:string;
-    imageUrl = response.images.grid;
-    imageArrayBuffer = await ctx.http.get(imageUrl, {responseType:"arraybuffer"});
+    const imageUrl:string = response.images.grid;
+    const BimageUrl:string = response.images.small;
+    // let imageArrayBuffer: ArrayBuffer;
+    // imageArrayBuffer = await ctx.http.get(imageUrl, {responseType:"arraybuffer"});
     // 返回数据
     return {
       nameCn: nameCn,
       gender,
-      image: imageArrayBuffer,
       imageUrl,
+      BimageUrl,
       summary: response.summary,
       popularity: response.stat.collects,
       id: characterId
@@ -731,28 +732,176 @@ async function generateFeedback(guess, answerCharacter) {// 根据用户答案�
 
 
 
-async function generateImg(pptr, input_character) {// 渲染图片
+async function generateSearchImg(pptr, input_result) {// 渲染搜索图片
+  try {
+    const page = await pptr.browser.newPage();
+    const result = input_result;
+    const searchHTML = `
+    <!DOCTYPE html>
+    <html>
+        <head>
+        <title>charactertable</title>
+        <style>
+            html {
+                width: 600px;
+                height: auto;
+            }
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            .background {
+                width: 100%;
+                height: auto;
+                padding: 8px;
+                background: linear-gradient(to right bottom, #FCCF31, #F55555);
+                overflow: hidden;
+            }
+            .base-plate {
+                width: 100%;
+                height: auto;
+                box-shadow: 0 4px 8px 0 rgba(0, 0, 0, 0.2);
+                padding: 5px;
+                border-radius: 10px;
+                background-color: #FFF5EE;
+            }
+            .card {
+                width: auto;
+                height: auto;
+                border-radius: 5px;
+                padding: 15px;
+                overflow: hidden;
+                background-color: #fff;
+                position: relative;
+            }
+            table {
+                width: 100%;
+                margin: auto;
+                table-layout: auto;
+                border-collapse: separate;	/* 让border-radius有效 */
+                border-spacing: 0; 
+                border-radius: 10px;
+                overflow: hidden;
+                text-align: center;
+            }
+            table thead tr, table tbody tr {
+                height: auto;
+                line-height: auto;
+            }
+            table td {
+                padding: 10px;
+                font-family: Arial, sans-serif;
+            }
+            table tr {
+                background: #ffffff;
+                color: rgb(0, 0, 0);
+                font-weight: bold;
+            }
+            table th {
+                background: #f68c3b;
+                color: rgb(0, 0, 0);
+                font-weight: bold;
+            }
+        </style>
+        </head>
+        <body>
+            <div class="background">
+                <div class="base-plate">
+                    <table>
+                        <thead>
+                            <tr>
+                            <th>头像</th><th>名字</th><th>日文名</th><th>ID</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${result.map(result => srerch_TableRow(result)).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </body>
+    </html>
+    `;
+    await page.setContent(searchHTML);
+    const elementHandle = await page.$("html");
+    const boundingBox = await elementHandle.boundingBox();
+    const screenshot = await page.screenshot({
+      type: "png",
+      clip: {
+        x: boundingBox.x,
+        y: boundingBox.y,
+        width: boundingBox.width,
+        height: boundingBox.height,
+      },
+    });
+    await page.close();
+    return screenshot;
+  } catch (error) {
+    console.log('用户关键词搜索出错：', error);
+  }
+}
+function srerch_TableRow(result:sCharacter) {//生成搜索结果表格行
+  // console.log('生成表格内参：', result.name, result.id);
+  return `
+    <tr>
+      <td><img src="${result.imgurl}" style="height: 50px;width: 50px;border-radius: 10px;"></td>
+      <td>${result.name}</td>
+      <td>${result.jname}</td>
+      <td>${result.id}</td>
+    </tr>
+  `;
+}
+
+async function generateImg(pptr, input_character) {// 渲染答案图片
   try {
     const page = await pptr.browser.newPage();
     const characters = input_character;
 
-    const testHTML = `
+    const answertableHTML = `
+    <!DOCTYPE html>
+    <html>
     <head>
     <title>charactertable</title>
       <style>
         html {
-          width: auto;
+          width: 1200px;
           height: auto;
         }
-        body {
-          font-family: Arial, sans-serif;
-          background-color: #f0f8ff;
-          margin: 0;
-          padding: 20px;
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }   
+        .background {
+            width: 100%;
+            height: auto;
+            padding: 8px;
+            background: linear-gradient(to right bottom, #FCCF31, #F55555);
+            overflow: hidden;
+            min-height: 500px;
+        }
+        .base-plate {
+            width: 100%;
+            height: auto;
+            box-shadow: 0 4px 8px 0 rgba(0, 0, 0, 0.2);
+            padding: 5px;
+            border-radius: 10px;
+            background-color: #fcf3f9;
+            min-height: 500px;
+        }
+        .card {
+            width: auto;
+            height: auto;
+            border-radius: 5px;
+            padding: 15px;
+            overflow: hidden;
+            background-color: #fff;
+            position: relative;
         }
         table {
           width: 100%;
-          margin: 20px 0;
+          margin: auto;
           table-layout: auto;
           background-color: #FBFBFB; 
           border-collapse: separate;	/* 让border-radius有效 */
@@ -761,7 +910,6 @@ async function generateImg(pptr, input_character) {// 渲染图片
           overflow: hidden;
           text-align: center;
         }
-        
         table thead tr, table tbody tr {
           height: auto;
           line-height: auto;
@@ -772,7 +920,7 @@ async function generateImg(pptr, input_character) {// 渲染图片
           font-weight: bold;
         }
         table th {
-          background: #869db1;
+          background: #f68c3b;
           color: rgb(0, 0, 0);
           font-weight: bold;
         }          
@@ -788,34 +936,49 @@ async function generateImg(pptr, input_character) {// 渲染图片
         }
       </style>
     </head>
-    <table style>
-      <thead>
-        <tr>
-          <th>名字</th><th>性别</th><th>人气值</th><th>作品数<br>最高分</th><th>最早登场<br>最晚登场</th><th>标签</th><th>共同出演</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${characters.map(character => generateTableRow(character)).join('')}
-      </tbody>
-    </table>
+    <body>
+        <div class="background">
+            <div class="base-plate">
+                <table>
+                    <thead>
+                      <tr>
+                        <th>名字</th><th>性别</th><th>人气值</th><th>作品数<br>最高分</th><th>最早登场<br>最晚登场</th><th>该角色与答案相同的标签</th><th>共同出演</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                        ${characters.map(character => ans_TableRow(character)).join('')}
+                  </table>
+            </div>
+        </div>
+    </body>
+    </html>
     `;
 
-    await page.setContent(testHTML);
-    const screenshot = await page.screenshot({encoding:'binary'});
+    await page.setContent(answertableHTML);
+    const elementHandle = await page.$("html");
+    const boundingBox = await elementHandle.boundingBox();
+    const screenshot = await page.screenshot({
+      type: "png",
+      clip: {
+        x: boundingBox.x,
+        y: boundingBox.y,
+        width: boundingBox.width,
+        height: boundingBox.height,
+      },
+    });
     await page.close();
     return screenshot;
   } catch (error) {
     console.log("渲染图片出错：", error);
   }
 }
-
-function generateTableRow(character: Character): string {//生成表格行
+function ans_TableRow(character: Character): string {// 生成答案表格行
   return `
     <tr>
-      <td><img src="${character.imgurl}" width="20px" height="20px">${character.name}</td>
+      <td style="display: flex; align-items: center; justify-content: center;"><img src="${character.imgurl}" style="height: 40px; width: 40px; border-radius: 15px; margin-right: 8px">${character.name}</td>
       <td>${character.gender}</td>
-      <td>${character.popularity}<br>${character.workscount}</td>
-      <td>${character.highestRating}</td>
+      <td>${character.popularity}</td>
+      <td>${character.workscount}<br>${character.highestRating}</td>
       <td>${character.earliestAppearance}<br>${character.latestAppearance}</td>
       <td style="max-width: 70px;">${character.tags.join(', ')}</td> 
       <td>${character.shared_appearances}</td>
@@ -823,6 +986,159 @@ function generateTableRow(character: Character): string {//生成表格行
   `;
 }
 
+async function generateResultImg(pptr, answer) {// 渲染回答正确图片
+  try {
+    const page = await pptr.browser.newPage();
+  const resHTML = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+    <title>答案</title>
+        <style>
+            @font-face {
+                font-family: "Custom Font";
+            }
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            html {
+                width: 800px;
+                height: auto;
+            }
+            .background {
+                width: 100%;
+                height: auto;
+                padding: 15px;
+                background: linear-gradient(to right bottom, #FCCF31, #F55555);
+                overflow: hidden;
+            }
+            .base-plate {
+                width: 100%;
+                height: auto;
+                box-shadow: 0 4px 8px 0 rgba(0, 0, 0, 0.2);
+                padding: 15px;
+                border-radius: 10px;
+                background-color: #FFF5EE;
+            }
+            .card {
+                width: 100%;
+                height: auto;
+                border-radius: 5px;
+                padding: 15px;
+                overflow: hidden;
+                background-color: #fff;
+                position: relative;
+            }
+            .card img {
+                border-radius: 5px 5px 0 0;
+                max-width: 100%;
+                /* 设置最大宽度为容器宽度的100% */
+                max-height: 80%;
+                /* 设置最大高度为容器高度的90% */
+            }
+            .card-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-top: 5px;
+                margin-bottom: 10px;
+            }
+            .card-title {
+                line-height: 50px;
+            }
+            .card-body {
+                padding: 2px 16px;
+                margin-bottom: 10px;
+            }
+            .character-info {
+                display: flex;
+                align-items: center;
+                margin-bottom: 10px;
+            }
+            .anchor-avatar {
+                width: 50px;
+                /* 头像大小 */
+                height: auto;
+                box-shadow: 0 4px 8px 0 rgba(0, 0, 0, 0.2);
+            }
+            .character-message {
+                display: inline-block;
+                margin-left: 10px;
+                font-size: 20px;
+                color: #333;
+            }
+            .card-text {
+                color: grey;
+                font-size: 20px;
+            }
+            .card-link {
+                display: flex;
+                justify-content: space-between;
+                text-decoration: none;
+                font-size: 20px;
+                margin-top: 10px;
+                margin-bottom: 10px;
+            }
+            .corner-text{
+                position: absolute;
+                top: 0; 
+                right: 0; 
+                margin-top: 100px;
+                margin-right: 150px;
+                color: rgb(0, 0, 0); 
+                font-size: 40px;
+                font-family: Arial, Helvetica, sans-serif;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="background">
+            <div class="base-plate">
+                <div class="card">                    
+                        <img src="${answer.bigImgurl}"
+                        alt="立绘">
+                        <div class="corner-text">
+                            ✨恭喜回答正确🎉
+                        </div>
+                    <div class="card-body">
+                        <div class="card-header">
+                            <h1 class="card-title">${answer.name}</h1>
+                            <div class="character-info">
+                                <!-- 头像 -->
+                                <img style="border-radius: 10px; margin-left: 10px" class="anchor-avatar"
+                                    src="${answer.imgurl}" alt="头像">
+                                <span class="character-message">ID:${answer.id}</span>
+                            </div>
+                        </div>
+                        <p class="card-text">${answer.summary}</p>
+                        <p class="card-link">
+                            <span>人气：${answer.popularity}</span>
+                            <span>代表作品：《${answer.work}》</span><br>
+                        </p>
+                    </div>
+    </body>
+    </html>
+  `
+  await page.setContent(resHTML);
+  const elementHandle = await page.$("html");
+  const boundingBox = await elementHandle.boundingBox();
+  const buffer = await page.screenshot({
+    type: "png",
+    clip: {
+      x: boundingBox.x,
+      y: boundingBox.y,
+      width: boundingBox.width,
+      height: boundingBox.height,
+    },
+  });
+  return buffer;
+  } catch (error) {
+    console.log('生成正确反馈图片错误：', error);
+  }
+  
+}
 
 
 
