@@ -20,6 +20,7 @@ export const usage = `
 <p> · 直接发送查询到的角色的ID，即可进行答题</p>
 <p> · 若开启了提示功能，发送<code>提示</code>即可得知答案角色的随机一个标签</p>
 <p> · 箭头↑代表答案数值要更大，箭头↓代表答案数值要更小 | 双箭头表示差距更大</p>
+<p> · 输入bzd即可结束本次游戏，并获得答案</p>
 <hr>
 <h3>关于题库自建题库：请点击👉<a href="https://anime-character-guessr.netlify.app/" target="_blank">Bangumi目录网址</a>自行创建题库目录</h3>
 <p> · 创建后点击进入目录，看见网址https://bangumi.tv/index/xxxxx</p>
@@ -36,9 +37,10 @@ export const usage = `
 <hr>
 <div class="version">
 <h3>Version</h3>
-<p>1.0.4</p>
+<p>1.0.5</p>
 <ul>
 <li>修复并优化了请求范围题库api的错误</li>
+<li>修改规则，将结束游戏指令更改为bzd</li>
 </ul>
 </div>
 <hr>
@@ -186,10 +188,10 @@ export function apply(ctx: Context, config) {
         if (config.reminder === true){
           const filteredMetaTags = answerAppearances.metaTags.filter(tag => tag !== config.atype && tag !== config.form); // 过滤掉用户自选类型
           const randomMetaTag = filteredMetaTags[Math.floor(Math.random() * filteredMetaTags.length)];
-          await session.send(`加载成功！猜猜呗游戏开始~\n · 发送 [搜索 角色关键词] 可根据关键词检索角色id，查阅后输入角色ID即可进行答题\n · 输入 结束 即可结束本次游戏\n · 提示词：【${randomMetaTag}】`);
+          await session.send(`加载成功！猜猜呗游戏开始~\n · 发送 [搜索 角色关键词] 可根据关键词检索角色id，查阅后输入角色ID即可进行答题\n · 输入 bzd 即可结束本次游戏\n · 提示词：【${randomMetaTag}】`);
           sentMetaTags.add(randomMetaTag);
         }else{
-          await session.send("加载成功！猜猜呗游戏开始~\n说明：输入[搜索 角色关键词]可根据关键词检索角色id，然后输入角色id即可进行答题~ \n· 输入 结束 即可结束本次游戏");
+          await session.send("加载成功！猜猜呗游戏开始~\n说明：输入[搜索 角色关键词]可根据关键词检索角色id，然后输入角色id即可进行答题~ \n· 输入 bzd 即可结束本次游戏");
         }
 
         if (config.outputLogs === true){
