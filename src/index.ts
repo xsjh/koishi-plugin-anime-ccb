@@ -1,43 +1,71 @@
-import { Context, Schema, h } from 'koishi'
+import { Context, Schema, h, Logger } from 'koishi'
 import {} from "koishi-plugin-puppeteer";
 
 export const name = 'anime-ccb'
+
+export const logger = new Logger('ccb');
 
 export const inject = {
   required: ["puppeteer"],
 };
 
 export const usage = `
-<h1>二刺螈猜猜呗</h1>
-
-<p>数据来源于 <a href="https://bgm.tv/" target="_blank">bgm.tv</a></p>
+<h1>二刺猿猜猜呗</h1>
+<p>角色数据来源于 <a href="https://bgm.tv/" target="_blank">bgm.tv</a></p>
+<p>灵感来源于 <a href="https://anime-character-guessr.netlify.app/" target="_blank">anime-character-guessr</a></p>
+<div class="Tutorials">
+<h3>Tutorials</h3>
+<p> ⭐️首先请检查token设置，根据指引生成自己的accesstoken⭐️</p>
+<p> · 输入指令即可开始游戏，加载完成后，输入<code>搜索 角色关键词</code>即可查询角色（例：搜索 千早爱音）</p>
+<p> · 直接发送查询到的角色的ID，即可进行答题</p>
+<p> · 若开启了提示功能，发送<code>提示</code>即可得知答案角色的随机一个标签</p>
+<p> · 箭头↑代表答案数值要更大，箭头↓代表答案数值要更小 | 双箭头表示差距更大</p>
+<hr>
+<h3>关于题库自建题库：请点击👉<a href="https://anime-character-guessr.netlify.app/" target="_blank">Bangumi目录网址</a>自行创建题库目录</h3>
+<p> · 创建后点击进入目录，看见网址https://bangumi.tv/index/xxxxx</p>
+<p> · 将数字：xxxxx填入indexId即可使用此题库</p>
+</div>
+<hr>
+<div class="notice">
+<h3>Notice</h3>
+<p>游玩中若遇到什么问题，或是一些其余反馈，请移步至👉<a href="https://forum.koishi.xyz/t/topic/10889" target="_blank">论坛10889帖</a>进行反馈</p>
+<p>⚠️由于bangumi游戏作品排名问题仅自建题库包含游戏选项，并且此功能未经测试，请谨慎开启⚠️</p>
+<p>Onebot 适配器下，偶尔发不出来图，Koishi 报错日志为 <code>retcode:1200</code> 时，请查看协议端日志自行解决！</p>
+<p>QQ 适配器下，偶尔发不出来图，Koishi 报错日志为 <code>bad request</code> 时，建议参见 👉<a href="https://forum.koishi.xyz/t/topic/10257" target="_blank">论坛10257帖</a>
+</div>
+<hr>
+<div class="version">
+<h3>Version</h3>
+<p>1.0.1</p>
+<ul>
+<li>完成图片渲染以及基本游戏逻辑</li>
+</ul>
+</div>
+<hr>
+<div class="thanks">
+<h3>Thanks</h3>
+<p>部分图片UI参考： <a href="/market?keyword=koishi-plugin-bilibili-notify">koishi-plugin-bilibili-notify</a></p>
+<hr>
+<h4>如果想继续开发优化本插件，<a href="https://github.com/xsjh/koishi-plugin-anime-ccb/pulls" target="_blank">欢迎 PR</a></h4>
+</body>
 `
 
 export interface Config {}
 
 export const Config: Schema<Config> = Schema.intersect([
   Schema.object({
+    accessToken: Schema.string().default("EP9NgEwLt2GgJWJSbFCDpqRNGCU0uVGCziFeEUMV").description("点击此链接生成： https://next.bgm.tv/demo/access-token <br>[ 默认的是作者自己的,可能会失效 ]"),
+    userAgent: Schema.string().default("ranabot").description("生成token时输入的名称"),
+  }).description('token设置'),
+
+  Schema.object({
     start_command: Schema.string().default("ccb").description("**游戏开始**的指令名称"),
-    include_game: Schema.boolean().default(false).description("是否包含游戏作品   **仅自建题库生效**"),
-    s_limit:Schema.number().default(10).description("关键词搜索的角色显示数量"),
+    include_game: Schema.boolean().default(false).description("是否包含游戏作品   **仅自建题库生效**").experimental(),
+    s_limit: Schema.number().default(10).min(5).max(20).description("关键词搜索的角色显示数量"),
+    a_limit: Schema.number().default(10).min(5).max(20).description("答题次数限制"),
     reminder: Schema.boolean().default(true).description("是否启用提示"),
   }).description('基础设置'),
-  Schema.object({
-    roles: Schema.union(['仅主角','全部角色']).required().description("角色范围设置"),
-  }).description('角色范围设置'),
-    Schema.union([
-      Schema.object({
-        roles: Schema.const('仅主角').required(),
-        op_subtag: Schema.number().default(6).min(1).max(10).description("作品标签数"),
-        op_chatag: Schema.number().default(6).min(1).max(10).description("角色标签数"),
-      }),
-      Schema.object({
-        roles: Schema.const('全部角色').required(),
-        persub_chanum: Schema.number().default(6).min(1).max(10).description("每个作品角色数"),
-        all_subtag: Schema.number().default(6).min(1).max(10).description("作品标签数"),
-        all_chatag: Schema.number().default(6).min(1).max(10).description("角色标签数"),
-      }),
-    ]),
+
   Schema.object({
     qtype: Schema.union(['使用自建题库','题库范围设置']).required().description("选择题库类型"),
   }).description('题库设置'),
@@ -56,6 +84,25 @@ export const Config: Schema<Config> = Schema.intersect([
         rank: Schema.number().default(50).min(1).max(1000).description("bangumi热度排行榜排名(前xx部)"),
       }),
     ]),
+
+  Schema.object({
+    roles: Schema.union(['仅主角','全部角色']).required().description("角色范围设置"),
+  }).description('答案范围设置'),
+    Schema.union([
+      Schema.object({
+        roles: Schema.const('仅主角').required(),
+        // op_subtag: Schema.number().default(6).min(1).max(10).description("从题库中抽选的作品数量"),
+        op_chatag: Schema.number().default(6).min(1).max(20).description("从每个作品中抽选的角色数量"),
+      }),
+      Schema.object({
+        roles: Schema.const('全部角色').required(),
+        persub_chanum: Schema.number().default(6).min(1).max(20).description("从每个作品中抽选的角色数量"),
+      }),
+    ]),
+
+  Schema.object({
+    outputLogs: Schema.boolean().default(false).description('日志调试模式，如有报错可开启进行排查').experimental(),
+  }).description('调试设置'),
 ]);
 
 // 游戏进程检测
@@ -93,19 +140,24 @@ interface sCharacter {
   jname: string;
   id: string;
 }
-
 // api授权
-const accessToken = 'EP9NgEwLt2GgJWJSbFCDpqRNGCU0uVGCziFeEUMV';
-    const userAgent = 'ranabot'
-    const headers = {
-      'User-Agent': userAgent,
-      'Authorization': `Bearer ${accessToken}`
-    };
+let headers: Record<string, string>;
+export function getHeaders(ctx: Context, config) {
+  // api授权
+  const accessToken = `${config.accessToken}`;
+  const userAgent = `${config.userAgent}`;
+  headers = {
+    'User-Agent': userAgent,
+    'Authorization': `Bearer ${accessToken}`
+  };
+}
+
 
 
 // 基本逻辑
 export function apply(ctx: Context, config) {
   let games: Gaming = {};
+  
 
   ctx.command(config.start_command)
     .action(async ({session}) => {
@@ -130,12 +182,21 @@ export function apply(ctx: Context, config) {
           ...answerAppearances,
           ...answerDetails
         }
-        await session.send("加载成功!猜猜呗游戏开始~\n输入[搜索 关键词]可根据关键词检索角色id");
+        // 根据情况发送开始提示
+        if (config.reminder === true){
+          const filteredMetaTags = answerAppearances.metaTags.filter(tag => tag !== config.atype && tag !== config.form); // 过滤掉用户自选类型
+          const randomMetaTag = filteredMetaTags[Math.floor(Math.random() * filteredMetaTags.length)];
+          await session.send(`加载成功！猜猜呗游戏开始~\n · 发送 [搜索 角色关键词] 可根据关键词检索角色id，查阅后输入角色ID即可进行答题\n · 输入 结束 即可结束本次游戏\n · 提示词：【${randomMetaTag}】`);
+          sentMetaTags.add(randomMetaTag);
+        }else{
+          await session.send("加载成功！猜猜呗游戏开始~\n说明：输入[搜索 角色关键词]可根据关键词检索角色id，然后输入角色id即可进行答题~ \n· 输入 结束 即可结束本次游戏");
+        }
 
         // 角色检索功能
         ctx.command('搜索 [...arg]')
         .action(async({session}, ...arg) => {
-          const kw = arg.join(' ').trim();
+          try {
+            const kw = arg.join(' ').trim();
           if (kw == ''){
             await session.send("您输入的关键词为空");
           }else{
@@ -154,8 +215,13 @@ export function apply(ctx: Context, config) {
                 };
                 result.push(s_character); 
               });
-              const imageBuffer = await generateSearchImg(ctx.puppeteer, result);
+              const imageBuffer = await generateSearchImg(ctx.puppeteer, result, config);
               await session.send(h.image(imageBuffer,"image/jpeg"));
+            }
+          }
+          } catch (error) {
+            if (config.outputLogs === true){
+              logger.error('检索角色出现问题：', error);
             }
           }
         });
@@ -201,7 +267,7 @@ export function apply(ctx: Context, config) {
               work: answerData.appearances[0]
             };
             // 发送答案正确卡片
-            const imageBuffer = await generateResultImg(ctx.puppeteer, answer);
+            const imageBuffer = await generateResultImg(ctx.puppeteer, answer, config);
             await session.send(h.image(imageBuffer,"image/jpeg"));
           }else if(session.content !== null && !isNaN(Number(session.content))){
             const user_ans = session.content;
@@ -211,8 +277,14 @@ export function apply(ctx: Context, config) {
             } else {
               userAnsHistory.push(user_ans);
             }
+            if (userAnsHistory.length > config.a_limit){
+              dispose();
+              games[session.channelId] = false;
+              await session.send(`次数已用尽，答案是：${answerData.nameCn}`);
+              return;
+            }
             // 获取用户回答角色
-            const ua_Details = await getCharacterDetails(user_ans,ctx);
+            const ua_Details = await getCharacterDetails(user_ans, ctx, config);
             const ua_Appearances = await getCharacterApperance(user_ans,ctx,config);
             console.log("用户回答细节：", ua_Details.nameCn + ua_Appearances.metaTags);
             const ua_Data = {
@@ -240,15 +312,25 @@ export function apply(ctx: Context, config) {
             an_character.earliestAppearance += result.earliestAppearance.feedback === '+' ? '↓' : result.earliestAppearance.feedback === '++' ? ' ↓↓' : result.earliestAppearance.feedback === '-' ? ' ↑' : result.earliestAppearance.feedback === '--' ? ' ↑↑' : '';
             an_character.latestAppearance += result.latestAppearance.feedback === '+' ? '↓' : result.latestAppearance.feedback === '++' ? ' ↓↓' : result.latestAppearance.feedback === '-' ? ' ↑' : result.latestAppearance.feedback === '--' ? ' ↑↑' : '';            
             characters.push(an_character);
-            const imageBuffer = await generateImg(ctx.puppeteer, characters);
+            const imageBuffer = await generateImg(ctx.puppeteer, characters, config);
             await session.send(h.image(imageBuffer,"image/jpeg"));
-          }                         
+          }
+
+          // 3、结束游戏
+          if (session.content === '结束'){
+            dispose();
+            games[session.channelId] = false;
+            await session.send('猜猜呗已结束~');
+            return;
+          }
         });
       } catch (error) {
         console.log("游戏进程错误：", error);
       }
     });
 }
+
+
 
 async function getSubjectDetails(subjectId: number, ctx: Context){// 获取作品信息
   try{
@@ -428,7 +510,7 @@ async function getCharacterApperance(characterId: string,ctx: Context, config) {
   }
 }
 
-async function getCharacterDetails(characterId:string, ctx:Context) {// 获取角色详细信息
+async function getCharacterDetails(characterId:string, ctx:Context, config) {// 获取角色详细信息
   try{
     // 请求api
     const url = `https://api.bgm.tv/v0/characters/${characterId}`;
@@ -446,8 +528,6 @@ async function getCharacterDetails(characterId:string, ctx:Context) {// 获取�
     // 获取图片
     const imageUrl:string = response.images.grid;
     const BimageUrl:string = response.images.small;
-    // let imageArrayBuffer: ArrayBuffer;
-    // imageArrayBuffer = await ctx.http.get(imageUrl, {responseType:"arraybuffer"});
     // 返回数据
     return {
       nameCn: nameCn,
@@ -459,7 +539,9 @@ async function getCharacterDetails(characterId:string, ctx:Context) {// 获取�
       id: characterId
     };
   }catch (error){
-    console.log("获取角色信息错误：",error);
+    if (config.outputLogs === true){
+      logger.error("获取角色信息错误,可能是token失效：",error);
+    }  
     throw error;
   }
 }
@@ -518,7 +600,6 @@ async function searchSubjects(keyword, ctx:Context) {// 根据关键词搜索作
     if (!response || !response.data) {
       return [];
     }
-    
     // 返回结果
     return response.data.map(subject => ({
       id: subject.id,
@@ -528,7 +609,6 @@ async function searchSubjects(keyword, ctx:Context) {// 根据关键词搜索作
       date: subject.date,
       type: subject.type==2 ? '动漫' : '游戏'
     }));
-    
   } catch (error) {
     console.error('关键词搜索作品错误:', error);
     return [];
@@ -582,7 +662,7 @@ async function getRandomCharacter(ctx:Context, config) {// 根据用户设置随
       if (config.roles === '仅主角'){
         filteredCharacters = characters.filter(character => character.relation === '主角').slice(0, config.op_chatag);
       }else{
-        filteredCharacters = characters.filter(character => character.relation === '主角' || character.relation === '配角').slice(0, config.all_chatag);
+        filteredCharacters = characters.filter(character => character.relation === '主角' || character.relation === '配角').slice(0, config.persub_chanum);
       }
       if (filteredCharacters.length === 0) {
         console.log('此作品中未找到角色');
@@ -591,7 +671,7 @@ async function getRandomCharacter(ctx:Context, config) {// 根据用户设置随
       const selectedCharacter = filteredCharacters[Math.floor(Math.random() * filteredCharacters.length)];
       console.log("获取的随机角色id为：",selectedCharacter.id);
       // 获取角色额外细节
-      const characterDetails = await getCharacterDetails(selectedCharacter.id,ctx);
+      const characterDetails = await getCharacterDetails(selectedCharacter.id, ctx, config);
       // 获取角色出场信息
       const appearances = await getCharacterApperance(selectedCharacter.id, ctx, config);
       // 返回数据
@@ -732,7 +812,7 @@ async function generateFeedback(guess, answerCharacter) {// 根据用户答案�
 
 
 
-async function generateSearchImg(pptr, input_result) {// 渲染搜索图片
+async function generateSearchImg(pptr, input_result, config) {// 渲染搜索图片
   try {
     const page = await pptr.browser.newPage();
     const result = input_result;
@@ -838,7 +918,9 @@ async function generateSearchImg(pptr, input_result) {// 渲染搜索图片
     await page.close();
     return screenshot;
   } catch (error) {
-    console.log('用户关键词搜索出错：', error);
+    if (config.outputLogs === true){
+      logger.error('渲染关键词搜索图片出错：', error);
+    }  
   }
 }
 function srerch_TableRow(result:sCharacter) {//生成搜索结果表格行
@@ -853,7 +935,7 @@ function srerch_TableRow(result:sCharacter) {//生成搜索结果表格行
   `;
 }
 
-async function generateImg(pptr, input_character) {// 渲染答案图片
+async function generateImg(pptr, input_character, config) {// 渲染回答展示表格图片
   try {
     const page = await pptr.browser.newPage();
     const characters = input_character;
@@ -969,24 +1051,29 @@ async function generateImg(pptr, input_character) {// 渲染答案图片
     await page.close();
     return screenshot;
   } catch (error) {
-    console.log("渲染图片出错：", error);
+    if (config.outputLogs === true){
+      logger.error("渲染回答展示表格图片出错：", error);
+    }  
   }
 }
 function ans_TableRow(character: Character): string {// 生成答案表格行
   return `
     <tr>
-      <td style="display: flex; align-items: center; justify-content: center;"><img src="${character.imgurl}" style="height: 40px; width: 40px; border-radius: 15px; margin-right: 8px">${character.name}</td>
-      <td>${character.gender}</td>
-      <td>${character.popularity}</td>
-      <td>${character.workscount}<br>${character.highestRating}</td>
-      <td>${character.earliestAppearance}<br>${character.latestAppearance}</td>
-      <td style="max-width: 70px;">${character.tags.join(', ')}</td> 
-      <td>${character.shared_appearances}</td>
-    </tr>
+    <td style="vertical-align: middle; text-align: center;">
+        <img src="${character.imgurl}" style="height: 38px; width: 38px; border-radius: 15px; margin-right: 8px; vertical-align: middle;">
+        <span style="vertical-align: middle;">${character.name}</span>
+    </td>
+    <td>${character.gender}</td>
+    <td>${character.popularity}</td>
+    <td>${character.workscount}<br>${character.highestRating}</td>
+    <td>${character.earliestAppearance}<br>${character.latestAppearance}</td>
+    <td style="max-width: 70px;">${character.tags.join(', ')}</td> 
+    <td>${character.shared_appearances}</td>
+</tr>
   `;
 }
 
-async function generateResultImg(pptr, answer) {// 渲染回答正确图片
+async function generateResultImg(pptr, answer, config) {// 渲染回答正确图片
   try {
     const page = await pptr.browser.newPage();
   const resHTML = `
@@ -1135,7 +1222,9 @@ async function generateResultImg(pptr, answer) {// 渲染回答正确图片
   });
   return buffer;
   } catch (error) {
-    console.log('生成正确反馈图片错误：', error);
+    if (config.outputLogs === true){
+      logger.error('渲染正确回答后的反馈图片失败：', error);
+    }
   }
   
 }
