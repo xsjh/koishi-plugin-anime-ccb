@@ -36,10 +36,9 @@ export const usage = `
 <hr>
 <div class="version">
 <h3>Version</h3>
-<p>1.0.2</p>
+<p>1.0.4</p>
 <ul>
-<li>完成图片渲染以及基本游戏逻辑</li>
-<li>增加更多logger信息</li>
+<li>修复并优化了请求范围题库api的错误</li>
 </ul>
 </div>
 <hr>
@@ -249,7 +248,7 @@ export function apply(ctx: Context, config) {
           };
 
           console.log("用户发送:", session.content);
-          console.log("答案:", answerData);
+          // console.log("答案:", answerData);
 
           // 2、判断答案
           if (session.content === `${answerData.id}` || session.content === `${answerData.nameCn}`){
@@ -274,21 +273,24 @@ export function apply(ctx: Context, config) {
             // 发送答案正确卡片
             const imageBuffer = await generateResultImg(ctx.puppeteer, answer, config);
             await session.send(h.image(imageBuffer,"image/jpeg"));
+          }else if(session.content === "bzd"){
+            dispose();
+            games[session.channelId] = false;
+            await session.send(`猜猜呗已结束，答案是：${answerData.nameCn},${answerData.id}`);
           }else if(session.content !== null && !isNaN(Number(session.content))){
-            const user_ans = session.content;
-            if (userAnsHistory.includes(user_ans)) {// 检查用户输入的角色是否已经存在表格中
-              await session.send("此角色已在表格中~");
-              return;
-            } else {
-              userAnsHistory.push(user_ans);
-            }
             if (userAnsHistory.length > config.a_limit){
               dispose();
               games[session.channelId] = false;
               await session.send(`次数已用尽，答案是：${answerData.nameCn}`);
               return;
             }
-            // 获取用户回答角色
+            const user_ans = session.content;
+            if (userAnsHistory.includes(user_ans)) {// 检查用户输入的角色是否已经存在表格中
+              await session.send("此角色已在表格中~");
+              return;
+            } else {
+              userAnsHistory.push(user_ans);
+              // 获取用户回答角色
             const ua_Details = await getCharacterDetails(user_ans, ctx, config);
             const ua_Appearances = await getCharacterApperance(user_ans,ctx,config);
             console.log("用户回答细节：", ua_Details.nameCn + ua_Appearances.metaTags);
@@ -319,16 +321,11 @@ export function apply(ctx: Context, config) {
             characters.push(an_character);
             const imageBuffer = await generateImg(ctx.puppeteer, characters, config);
             await session.send(h.image(imageBuffer,"image/jpeg"));
+            } 
+          }else{
+            return next();
           }
-
-          // 3、结束游戏
-          if (session.content === '结束'){
-            dispose();
-            games[session.channelId] = false;
-            await session.send('猜猜呗已结束~');
-            return;
-          }
-        });
+        },true);
       } catch (error) {
         console.log("游戏进程错误：", error);
       }
@@ -623,68 +620,116 @@ async function searchSubjects(keyword, ctx:Context) {// 根据关键词搜索作
 async function getRandomCharacter(ctx:Context, config) {// 根据用户设置随机获取角色（答案）
   try {
     // 初始变量
-    let subject;
+    let subject:number;
     let randomOffset;
     let filteredCharacters: any[];
+    const batchSize = 10;
+    let total;
+    let batchOffset;
+    let indexInBatch;
 
     // 自建题库模式
     if (config.qtype === '使用自建题库' && config.indexId){
       const indexInfo = await getIndexInfo(config.indexId, ctx);// 获取目录信息
       randomOffset = Math.floor(Math.random() * indexInfo.total);// 生成随机偏移量
-      //请求api从题库选择一个作品
-      const indexResponse = await ctx.http.get(`https://api.bgm.tv/v0/indices/${config.indexId}/subjects?limit=1&offset=${randomOffset}`)//从索引选择一个作品
-      if (!indexResponse) {
-        console.log('此目录未找到作品！')
+      batchOffset = Math.floor(randomOffset / batchSize) * batchSize;
+      indexInBatch = randomOffset % batchSize;
+      if(config.outputLogs === true){
+        logger.info(`
+          此次随机角色请求参数：https://api.bgm.tv/v0/indices/${config.indexId}/subjects?limit=1&offset=${randomOffset}
+          若返回结果失败，则请前往 https://bangumi.github.io/api/#/%E7%9B%AE%E5%BD%95/getIndexById 自行尝试看看能否请求成功
+          `);
       }
-      subject = indexResponse;
+      //请求api从题库选择一个作品
+      const indexResponse = await ctx.http.get(`https://api.bgm.tv/v0/indices/${config.indexId}/subjects?limit=${batchSize}&offset=${batchOffset}`)//从索引选择一个作品
+      if (!indexResponse || !indexResponse.data || indexResponse.data.length === 0) {
+        logger.error('此目录未找到作品！');
+      }
+      if(config.outputLogs === true){
+        const all_resid = indexResponse.data.map(item => item.id);
+        logger.info("范围题库的response：", all_resid);
+        logger.info('此次选择的id是：',indexResponse.data[Math.min(indexInBatch, indexResponse.data.length)].id)
+      }
+      subject = indexResponse.data[Math.min(indexInBatch, indexResponse.data.length)].id;
     }else{
     // 设置范围模式
-      const mtag_filter = Array.isArray(config.atype) ? config.qtype : [config.atype];// 获取类型标签
-      randomOffset = Math.floor(Math.random() * config.rank);// 生成随机偏移量
-      const endDate = new Date(`${config.end_year + 1}-01-01`);
-      const today = new Date();
-      const minDate = new Date(Math.min(endDate.getTime(), today.getTime())).toISOString().split('T')[0];
-      // 请求api，过滤作品类型
-      const response = await ctx.http.post(`https://api.bgm.tv/v0/search/subjects?limit=1&offset=${randomOffset}`,{
+    total = config.rank;
+    randomOffset = Math.floor(Math.random() * total);
+    const endDate = new Date(`${config.end_year + 1}-01-01`);
+    const today = new Date();
+    const minDate = new Date(Math.min(endDate.getTime(), today.getTime())).toISOString().split('T')[0];
+    batchOffset = Math.floor(randomOffset / batchSize) * batchSize;
+    indexInBatch = randomOffset % batchSize;
+    const metaTags = [config.form,config.origin,config.atype];// 合并用户选择的分类
+   
+    if(config.outputLogs === true){// logger内容
+      const log_meta_tags = metaTags.filter(tag => tag !== "全部");
+      console.log(`
+        此次随机角色请求参数：
+        post：(https://api.bgm.tv/v0/search/subjects?limit=${batchSize}&offset=${batchOffset},{
         "sort": "heat",
-        "filter":{
-          "type": [2],
-          "air_date": [`>=${config.start_year}-01-01`,
-          `<${minDate}`],
-          "meta_tags": mtag_filter.filter(tag => tag !== "")// 根据过滤条件获取
-        }
-      });
-      if (!response) {
-        console.log('设置范围模式随机获取角色失败');
+        "filter": {
+        "type": [2],
+        "air_date": [
+        air-date: >=${config.start_year}-01-01 <${minDate}
+        meta_tags: ${log_meta_tags}
+        若返回结果失败，则请前往 https://bangumi.github.io/api/#/%E6%9D%A1%E7%9B%AE/searchSubjects 自行尝试看看能否请求成功
+        `)
+    }
+    // 请求api，过滤作品类型
+    const response = await ctx.http.post(`https://api.bgm.tv/v0/search/subjects?limit=${batchSize}&offset=${batchOffset}`,{
+      "sort": "heat",
+      "filter": {
+        "type": [2],
+        "air_date": [
+          `>=${config.start_year}-01-01`,
+          `<${minDate}`
+        ],
+        "meta_tags": metaTags.filter(tag => tag !== "全部")// 根据过滤条件获取
       }
-      subject = response;
-      }
+    });
 
-      // 获取作品中的角色
-      console.log("获取的作品subjectId为：",subject.data[0].id);
-      const characters = await getCharactersBySubjectId(subject.data[0].id,ctx);
-      // 过滤主配角
-      if (config.roles === '仅主角'){
-        filteredCharacters = characters.filter(character => character.relation === '主角').slice(0, config.op_chatag);
-      }else{
-        filteredCharacters = characters.filter(character => character.relation === '主角' || character.relation === '配角').slice(0, config.persub_chanum);
-      }
-      if (filteredCharacters.length === 0) {
-        console.log('此作品中未找到角色');
-      }
-      // 随机选择角色
-      const selectedCharacter = filteredCharacters[Math.floor(Math.random() * filteredCharacters.length)];
-      console.log("获取的随机角色id为：",selectedCharacter.id);
-      // 获取角色额外细节
-      const characterDetails = await getCharacterDetails(selectedCharacter.id, ctx, config);
-      // 获取角色出场信息
-      const appearances = await getCharacterApperance(selectedCharacter.id, ctx, config);
-      // 返回数据
-      return {
-        selectedCharacter,
-        characterDetails,
-        appearances
-      };
+    if (!response || !response.data || response.data.length === 0) {
+      logger.error('范围题库随机获取作品失败！');
+    }
+    
+    if(config.outputLogs === true){ // 在日志显示获取的所有id
+      const all_resid = response.data.map(item => item.id);
+      logger.info("范围题库的response：", all_resid);
+      logger.info('此次选择的id是：',response.data[Math.min(indexInBatch, response.data.length)].id)
+    }
+    subject = response.data[Math.min(indexInBatch, response.data.length)].id;
+    }
+
+    // 获取作品中的角色
+    if(config.outputLogs === true){
+      logger.info("获取的作品subjectId为：",subject);
+    }
+    console.log("获取的作品subjectId为：",subject);
+      
+    const characters = await getCharactersBySubjectId(subject,ctx);
+    // 过滤主配角
+    if (config.roles === '仅主角'){
+      filteredCharacters = characters.filter(character => character.relation === '主角').slice(0, config.op_chatag);
+    }else{
+      filteredCharacters = characters.filter(character => character.relation === '主角' || character.relation === '配角').slice(0, config.persub_chanum);
+    }
+    if (filteredCharacters.length === 0) {
+      console.log('此作品中未找到角色');
+    }
+    // 随机选择角色
+    const selectedCharacter = filteredCharacters[Math.floor(Math.random() * filteredCharacters.length)];
+    console.log("获取的随机角色id为：",selectedCharacter.id);
+    // 获取角色额外细节
+    const characterDetails = await getCharacterDetails(selectedCharacter.id, ctx, config);
+    // 获取角色出场信息
+    const appearances = await getCharacterApperance(selectedCharacter.id, ctx, config);
+    // 返回数据
+    return {
+      selectedCharacter,
+      characterDetails,
+      appearances
+    };
   } catch (error) {
     if (config.outputLogs === true){
       logger.error('生成答案失败：', error);
