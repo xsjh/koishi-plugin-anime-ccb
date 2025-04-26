@@ -36,9 +36,10 @@ export const usage = `
 <hr>
 <div class="version">
 <h3>Version</h3>
-<p>1.0.1</p>
+<p>1.0.2</p>
 <ul>
 <li>完成图片渲染以及基本游戏逻辑</li>
+<li>增加更多logger信息</li>
 </ul>
 </div>
 <hr>
@@ -190,6 +191,10 @@ export function apply(ctx: Context, config) {
           sentMetaTags.add(randomMetaTag);
         }else{
           await session.send("加载成功！猜猜呗游戏开始~\n说明：输入[搜索 角色关键词]可根据关键词检索角色id，然后输入角色id即可进行答题~ \n· 输入 结束 即可结束本次游戏");
+        }
+
+        if (config.outputLogs === true){
+          logger.info('游戏启动成功，答案为：', answerData.id, answerData.nameCn);
         }
 
         // 角色检索功能
@@ -681,6 +686,9 @@ async function getRandomCharacter(ctx:Context, config) {// 根据用户设置随
         appearances
       };
   } catch (error) {
+    if (config.outputLogs === true){
+      logger.error('生成答案失败：', error);
+    }
     console.log("获取随机角色错误：", error);
   }
 }
