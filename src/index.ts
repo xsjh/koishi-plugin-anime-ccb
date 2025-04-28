@@ -45,12 +45,12 @@ export const usage = `
 <hr>
 <div class="version">
 <h3>Version</h3>
-<p>1.0.8</p>
+<p>1.0.9</p>
 <ul>
 <li>修复了年份显示bug</li>
 <li>增加搜作品与根据作品搜角色指令</li>
 <li>完成反馈卡片渲染</li>
-<li>取消了开启提示功能情况下开局自动发送标签功能，并优化提示功能的标签发送</li>
+<li>取消了开启提示功能情况下开局自动发送标签功能，现在提示标签不会发送上个角色已经命中的和用户自选的类别</li>
 <li>优化了开局规则讲解</li>
 <li>现在面对初始化失败时能正确的抛出错误并返回</li>
 </ul>
@@ -337,14 +337,20 @@ export function apply(ctx: Context, config) {
               ...answerData.appearances,
               answerData.jname,
               answerData.nameCn,
-              ...pre_sharedTags
+              ...pre_sharedTags,
+              '日本'
             ];
+            // console.log('需要过滤的tag：', excludedTags);
             const filteredMetaTags = answerAppearances.metaTags.filter(tag => !excludedTags.includes(tag)); // 过滤掉用户自选类型
             const availableMetaTags = filteredMetaTags.filter(tag => !sentMetaTags.has(tag));// 过滤掉已发送的元标签
+            if(config.outputLogs === true){
+              logger.info('提示可用的剩余tag：', availableMetaTags);
+            }
             if (availableMetaTags && availableMetaTags.length > 0) {
               const randomMetaTag = availableMetaTags[Math.floor(Math.random() * availableMetaTags.length)];
               await session.send(`提示：角色的一个元标签是 ${randomMetaTag}`);  
               sentMetaTags.add(randomMetaTag);// 将已发送的元标签添加到集合中
+              // console.log('已发送的tag：', sentMetaTags);
             }else{
               await session.send("所有元标签已发送完毕！");
             }
@@ -381,7 +387,7 @@ export function apply(ctx: Context, config) {
           }else if(session.content === "bzd"){
             dispose();
             games[session.channelId] = false;
-            // 发送答案错误卡片
+            // 发送bzd卡片
             const imageBuffer = await generateResultImg(ctx.puppeteer, card_info, config, '错误');
             await session.send(h.image(imageBuffer,"image/jpeg"));
           }else if(session.content !== null && !isNaN(Number(session.content))){
@@ -399,7 +405,9 @@ export function apply(ctx: Context, config) {
               ...ua_Appearances,
               ...ua_Details
             }
+            
             const result = await generateFeedback(ua_Data, answerData);
+            pre_sharedTags = result.metaTags.shared;// 传入提示模块
             const an_character:Character = {// 处理卡片渲染需要的数据
               imgurl: ua_Data.imageUrl,
               name: ua_Data.nameCn,
