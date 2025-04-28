@@ -20,6 +20,7 @@ export const usage = `
 <p> · 直接发送查询到的角色的ID，即可进行答题</p>
 <p> · 若开启了提示功能，发送<code>提示</code>即可得知答案角色的随机一个标签</p>
 <p> · 箭头↑代表答案数值要更大，箭头↓代表答案数值要更小 | 双箭头表示差距更大</p>
+<p> · 输入bzd即可结束本次游戏，并获得答案</p>
 <hr>
 <h3>关于题库自建题库：请点击👉<a href="https://anime-character-guessr.netlify.app/" target="_blank">Bangumi目录网址</a>自行创建题库目录</h3>
 <p> · 创建后点击进入目录，看见网址https://bangumi.tv/index/xxxxx</p>
@@ -36,10 +37,10 @@ export const usage = `
 <hr>
 <div class="version">
 <h3>Version</h3>
-<p>1.0.2</p>
+<p>1.0.5</p>
 <ul>
-<li>完成图片渲染以及基本游戏逻辑</li>
-<li>增加更多logger信息</li>
+<li>修复并优化了请求范围题库api的错误</li>
+<li>修改规则，将结束游戏指令更改为bzd</li>
 </ul>
 </div>
 <hr>
