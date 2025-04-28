@@ -1,7 +1,7 @@
 {
   "name": "koishi-plugin-anime-ccb",
   "description": "二刺螈猜猜呗",
-  "version": "1.0.5",
+  "version": "1.0.8",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
   "files": [

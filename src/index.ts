@@ -45,18 +45,21 @@ export const usage = `
 <hr>
 <div class="version">
 <h3>Version</h3>
-<p>1.0.7</p>
+<p>1.0.8</p>
 <ul>
 <li>修复了年份显示bug</li>
 <li>增加搜作品与根据作品搜角色指令</li>
 <li>完成反馈卡片渲染</li>
 <li>取消了开启提示功能情况下开局自动发送标签功能，并优化提示功能的标签发送</li>
+<li>优化了开局规则讲解</li>
+<li>现在面对初始化失败时能正确的抛出错误并返回</li>
 </ul>
 </div>
 <hr>
 <div class="thanks">
 <h3>Thanks</h3>
 <p>部分图片UI参考： <a href="/market?keyword=koishi-plugin-bilibili-notify">koishi-plugin-bilibili-notify</a></p>
+<p>感谢风切的宝贵意见</p>
 <hr>
 <h4>如果想继续开发优化本插件，<a href="https://github.com/xsjh/koishi-plugin-anime-ccb/pulls" target="_blank">欢迎 PR</a></h4>
 </body>
@@ -198,9 +201,9 @@ export function apply(ctx: Context, config) {
         }
         // 发送开始提示
         if (config.qtype === '使用自建题库'){
-          await session.send("加载成功！猜猜呗游戏开始~\n· 说明：输入[搜角色 角色关键词]可根据关键词检索角色id，然后输入角色id即可进行答题~\n· 说明：输入[搜作品 作品关键词]可根据作品检索角色id \n· 输入 bzd 即可结束本次游戏\n本次题库范围：自建题库");
+          await session.send(`加载成功！猜猜呗游戏开始~\n · 输入[搜角色 角色关键词]即可查询角色id\n · 输入[搜作品 作品关键词]即可查询作品id\n · 输入[作品搜角色 作品id]即可查询对应作品的出场角色id\n · 发送查询到的角色的id，即可进行答题\n · 输入 bzd 即可结束本次游戏\n本次题库范围：自建题库 - ${config.roles}`);
         }else{
-          await session.send(`加载成功！猜猜呗游戏开始~\n· 说明：输入[搜角色 角色关键词]可根据关键词检索角色id，然后输入角色id即可进行答题~\n· 说明：输入[搜作品 作品关键词]可根据作品检索角色id \n· 输入 bzd 即可结束本次游戏\n本次题库范围：\n · 门类：${config.form} · ${config.atype} · ${config.origin}\n · 时间范围：${config.start_year} - ${config.end_year}\n · Bangumi热度榜前${config.rank}名`);
+          await session.send(`加载成功！猜猜呗游戏开始~\n · 输入[搜角色 角色关键词]即可查询角色id\n · 输入[搜作品 作品关键词]即可查询作品id\n · 输入[作品搜角色 作品id]即可查询对应作品的出场角色id\n · 发送查询到的角色的id，即可进行答题\n · 输入 bzd 即可结束本次游戏\n本次题库范围：\n · 门类：${config.form} · ${config.atype} · ${config.origin}\n · 人物范围：${config.roles}\n · 时间范围：${config.start_year} - ${config.end_year}\n · Bangumi热度榜前${config.rank}名`);
         }
         
         
@@ -289,7 +292,7 @@ export function apply(ctx: Context, config) {
           }
         });
         // 检索作品命令
-        ctx.command('作品id [...arg]')
+        ctx.command('搜作品 [...arg]')
         .action(async({session}, ...arg) => {
           try {
             const kw = arg.join(' ').trim();
@@ -434,6 +437,8 @@ export function apply(ctx: Context, config) {
         },true);
       } catch (error) {
         logger.error("ccb游戏进程错误：", error);
+        games[session.channelId] = false;
+        await session.send('游戏初始化失败，请重新开始，或是酌情调整题库范围');
         return;
       }
     });
