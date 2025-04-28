@@ -1,3 +1,4 @@
+import {} from '@koishijs/plugin-help'
 import { Context, Schema, h, Logger } from 'koishi'
 import {} from "koishi-plugin-puppeteer";
 
@@ -13,34 +14,43 @@ export const usage = `
 <h1>二刺猿猜猜呗</h1>
 <p>角色数据来源于 <a href="https://bgm.tv/" target="_blank">bgm.tv</a></p>
 <p>灵感来源于 <a href="https://anime-character-guessr.netlify.app/" target="_blank">anime-character-guessr</a></p>
-<div class="Tutorials">
-<h3>Tutorials</h3>
-<p> ⭐️首先请检查token设置，根据指引生成自己的accesstoken⭐️</p>
-<p> · 输入指令即可开始游戏，加载完成后，输入<code>搜索 角色关键词</code>即可查询角色（例：搜索 千早爱音）</p>
-<p> · 直接发送查询到的角色的ID，即可进行答题</p>
+<hr>
+<h2>Tutorials</h2>
+<h3> ⭐️开启游戏前请先检查token设置，根据指引生成自己的accesstoken⭐️</h3>
+<h4>指令介绍：</h4>
+<p>输入指令即可开始游戏，加载完成后:</p>
+<ul>
+<p> · 输入<code>搜角色 角色关键词</code>即可查询角色（例：搜索 千早爱音）</p>
+<p> · 输入<code>搜作品 作品关键词</code>即可查询作品id（例：搜索 间谍过家家）</p>
+<p> · 输入<code>作品搜角色 作品ID</code>即可查询对应作品的出场角色id（例：搜索 间谍过家家）</p>
+</ul>
+<p><b>发送查询到的角色的ID，即可进行答题</b></p>
+<ul>
 <p> · 若开启了提示功能，发送<code>提示</code>即可得知答案角色的随机一个标签</p>
 <p> · 箭头↑代表答案数值要更大，箭头↓代表答案数值要更小 | 双箭头表示差距更大</p>
-<p> · 输入bzd即可结束本次游戏，并获得答案</p>
-<hr>
-<h3>关于题库自建题库：请点击👉<a href="https://anime-character-guessr.netlify.app/" target="_blank">Bangumi目录网址</a>自行创建题库目录</h3>
+<p> · 输入<code>bzd</code>即可结束本次游戏，并获得答案</p>
+</ul>
+<h3>如何创建自建题库？</h3>
+<ul>
+<p>请点击👉<b><u><a href="https://anime-character-guessr.netlify.app/" target="_blank">Bangumi目录网址</a></u></b></p>
 <p> · 创建后点击进入目录，看见网址https://bangumi.tv/index/xxxxx</p>
 <p> · 将数字：xxxxx填入indexId即可使用此题库</p>
-</div>
+</ul>
 <hr>
-<div class="notice">
 <h3>Notice</h3>
-<p>游玩中若遇到什么问题，或是一些其余反馈，请移步至👉<a href="https://forum.koishi.xyz/t/topic/10889" target="_blank">论坛10889帖</a>进行反馈</p>
-<p>⚠️由于bangumi游戏作品排名问题仅自建题库包含游戏选项，并且此功能未经测试，请谨慎开启⚠️</p>
+<p>游玩中若遇到什么问题，或是一些其余反馈，请移步至👉<b><a href="https://forum.koishi.xyz/t/topic/10889" target="_blank">论坛10889帖</a>进行反馈</b></p>
+<p>⚠️由于bangumi游戏作品排名问题，仅自建题库包含游戏选项，并且此功能未经测试，请谨慎开启⚠️</p>
 <p>Onebot 适配器下，偶尔发不出来图，Koishi 报错日志为 <code>retcode:1200</code> 时，请查看协议端日志自行解决！</p>
-<p>QQ 适配器下，偶尔发不出来图，Koishi 报错日志为 <code>bad request</code> 时，建议参见 👉<a href="https://forum.koishi.xyz/t/topic/10257" target="_blank">论坛10257帖</a>
-</div>
+<p>QQ 适配器下，偶尔发不出来图，Koishi 报错日志为 <code>bad request</code> 时，建议参见 👉<b><a href="https://forum.koishi.xyz/t/topic/10257" target="_blank">论坛10257帖</b></a>
 <hr>
 <div class="version">
 <h3>Version</h3>
-<p>1.0.5</p>
+<p>1.0.7</p>
 <ul>
-<li>修复并优化了请求范围题库api的错误</li>
-<li>修改规则，将结束游戏指令更改为bzd</li>
+<li>修复了年份显示bug</li>
+<li>增加搜作品与根据作品搜角色指令</li>
+<li>完成反馈卡片渲染</li>
+<li>取消了开启提示功能情况下开局自动发送标签功能，并优化提示功能的标签发送</li>
 </ul>
 </div>
 <hr>
@@ -161,7 +171,7 @@ export function apply(ctx: Context, config) {
   let games: Gaming = {};
   
 
-  ctx.command(config.start_command)
+  ctx.command(config.start_command, '二次猿猜猜呗')
     .action(async ({session}) => {
 
       // 初始化
@@ -199,7 +209,7 @@ export function apply(ctx: Context, config) {
           logger.info('游戏启动成功，答案为：', answerData.id, answerData.nameCn);
         }
 
-        // 角色检索功能
+        // 角色检索命令
         ctx.command('搜角色 [...arg]')
         .action(async({session}, ...arg) => {
           try {
@@ -232,6 +242,7 @@ export function apply(ctx: Context, config) {
             }
           }
         });
+        // 根据作品检索角色命令
         ctx.command('作品搜角色 [...arg]')
         .action(async({session}, ...arg) => {
           try {
@@ -250,21 +261,24 @@ export function apply(ctx: Context, config) {
             }else{
               filteredres = sc_response.filter(character => character.relation === '主角' || character.relation === '配角').slice(0, config.persub_chanum);
             }
+            console.log('作品返回角色：',filteredres);
             if (filteredres.length === 0){
               await session.send("未找到相关角色");
               return;
             }else{// 发送检索结果
               const result: sCharacter [] =[];
-              filteredres.forEach(character => {
+              for (const character of filteredres) {// 改用for of方法处理异步函数
+                const getNameCn = await getCharacterDetails(character.id, ctx, config);
                 const sc_character: sCharacter = {
                   id: character.id.toString(),
                   jname: character.name,
                   imgurl: character.images?.grid || [],
-                  name: character.actors.map(actor => actor.name) || '无中文名'
+                  name: getNameCn.nameCn || '无中文名'
                 };
-                console.log('中文名：', character.actors.map(actor => actor.name));
-                result.push(sc_character); 
-              });
+                console.log('中文名：', getNameCn.nameCn);
+                result.push(sc_character);
+              }
+              console.log('result', result);
               const sc_imageBuffer = await generateSearchImg(ctx.puppeteer, result, config);
               await session.send(h.image(sc_imageBuffer,"image/jpeg"));
             }
@@ -274,7 +288,7 @@ export function apply(ctx: Context, config) {
             }
           }
         });
-        // 作品检索角色功能
+        // 检索作品命令
         ctx.command('作品id [...arg]')
         .action(async({session}, ...arg) => {
           try {
@@ -336,18 +350,15 @@ export function apply(ctx: Context, config) {
           console.log("用户发送:", session.content);
           // console.log("答案:", answerData.metaTags);
 
-          // 2、判断答案
-          if (session.content === `${answerData.id}` || session.content === `${answerData.nameCn}`){
-            dispose();
-            games[session.channelId] = false;
-            const summary = answerData.summary;
+          // 提前处理结果卡片渲染需要的数据
+          const summary = answerData.summary;
             let handled_sum = null;
             if (summary.length > 200) {// 处理简介
               handled_sum = summary.substring(0, 200) + '...';
             }else{
               handled_sum = summary;
             }
-            const answer = {// 处理卡片渲染需要的数据
+            const card_info = {
               bigImgurl: answerData.BimageUrl,
               name: answerData.nameCn,
               imgurl: answerData.imageUrl,
@@ -356,13 +367,20 @@ export function apply(ctx: Context, config) {
               popularity: answerData.popularity,
               work: answerData.appearances[0]
             };
+
+          // 2、判断答案
+          if (session.content === `${answerData.id}` || session.content === `${answerData.nameCn}`){
+            dispose();
+            games[session.channelId] = false;
             // 发送答案正确卡片
-            const imageBuffer = await generateResultImg(ctx.puppeteer, answer, config);
+            const imageBuffer = await generateResultImg(ctx.puppeteer, card_info, config, '正确');
             await session.send(h.image(imageBuffer,"image/jpeg"));
           }else if(session.content === "bzd"){
             dispose();
             games[session.channelId] = false;
-            await session.send(`猜猜呗已结束，答案是：${answerData.nameCn},${answerData.id}`);
+            // 发送答案错误卡片
+            const imageBuffer = await generateResultImg(ctx.puppeteer, card_info, config, '错误');
+            await session.send(h.image(imageBuffer,"image/jpeg"));
           }else if(session.content !== null && !isNaN(Number(session.content))){
             const user_ans = session.content;
             if (userAnsHistory.includes(user_ans)) {// 检查用户输入的角色是否已经存在表格中
@@ -387,7 +405,7 @@ export function apply(ctx: Context, config) {
               workscount: result.appearancesCount.guess,
               highestRating: result.rating.guess,
               earliestAppearance: result.earliestAppearance.guess,
-              latestAppearance: result.earliestAppearance.guess,
+              latestAppearance: result.latestAppearance.guess,
               tags: result.metaTags.shared,
               shared_appearances: result.shared_appearances.first
             }
@@ -402,10 +420,12 @@ export function apply(ctx: Context, config) {
             const imageBuffer = await generateImg(ctx.puppeteer, characters, config);
             await session.send(h.image(imageBuffer,"image/jpeg"));
             } 
-            if (userAnsHistory.length > config.a_limit){
+            if (userAnsHistory.length > config.a_limit - 1){
               dispose();
               games[session.channelId] = false;
-              await session.send(`次数已用尽，答案是：${answerData.nameCn}`);
+              // 发送次数过多卡片
+              const imageBuffer = await generateResultImg(ctx.puppeteer, card_info, config, '次数');
+              await session.send(h.image(imageBuffer,"image/jpeg"));
               return;
             }
           }else{
@@ -413,7 +433,8 @@ export function apply(ctx: Context, config) {
           }
         },true);
       } catch (error) {
-        console.log("游戏进程错误：", error);
+        logger.error("ccb游戏进程错误：", error);
+        return;
       }
     });
 }
@@ -645,7 +666,7 @@ async function getCharactersBySubjectId(subjectId:number, ctx:Context) {// 根�
     return filteredCharacters;
   } catch (error) {
     console.error('从作品获取角色错误:', error);
-    throw error;
+    return;
   }
 }
 
@@ -819,6 +840,7 @@ async function getRandomCharacter(ctx:Context, config) {// 根据用户设置随
       logger.error('生成答案失败：', error);
     }
     console.log("获取随机角色错误：", error);
+    return;
   }
 }
 
@@ -1210,9 +1232,18 @@ function ans_TableRow(character: Character): string {// 生成答案表格行
   `;
 }
 
-async function generateResultImg(pptr, answer, config) {// 渲染回答正确图片
+async function generateResultImg(pptr, answer, config, result) {// 渲染回答正确图片
   try {
+    let res_sen;
     const page = await pptr.browser.newPage();
+    if (result === '正确') {
+      res_sen = "✨恭喜回答正确🎉";
+    } else if (result === '错误') {
+      res_sen = "请再接再厉~🥺";
+    } else if (result === '次数') {
+      res_sen = "👆🤓次数已用尽了哦~";
+    }
+    
   const resHTML = `
     <!DOCTYPE html>
     <html>
@@ -1324,7 +1355,7 @@ async function generateResultImg(pptr, answer, config) {// 渲染回答正确图
                         <img src="${answer.bigImgurl}"
                         alt="立绘">
                         <div class="corner-text">
-                            ✨恭喜回答正确🎉
+                            ${res_sen}
                         </div>
                     <div class="card-body">
                         <div class="card-header">
