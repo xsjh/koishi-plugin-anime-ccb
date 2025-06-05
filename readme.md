@@ -17,5 +17,5 @@
 · 创建后点击进入目录，看见网址https://bangumi.tv/index/xxxxx
 · 将数字：xxxxx填入indexId即可使用此题库
 
-游玩中若遇到什么问题，或是一些其余反馈，请移步至👉<"https://forum.koishi.xyz/t/topic/10889" >论坛10889帖进行反馈
+游玩中若遇到什么问题，或是一些其余反馈，请移步至👉[论坛10889帖](https://forum.koishi.xyz/t/topic/10889)进行反馈
 ⚠️由于bangumi游戏作品排名问题仅自建题库包含游戏选项，并且此功能未经测试，请谨慎开启⚠️
