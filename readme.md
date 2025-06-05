@@ -13,7 +13,7 @@
 · 若开启了提示功能，发送 提示 即可得知答案角色的随机一个标签
 · 箭头↑代表答案数值要更大，箭头↓代表答案数值要更小 | 双箭头表示差距更大
 
-关于题库自建题库：请点击 👉https://anime-character-guessr.netlify.app/Bangumi 目录网址，自行创建题库目录
+关于题库自建题库：请点击👉[Bangumi目录网址](https://bangumi.tv/index)，自行创建题库目录
 · 创建后点击进入目录，看见网址https://bangumi.tv/index/xxxxx
 · 将数字：xxxxx填入indexId即可使用此题库
 
